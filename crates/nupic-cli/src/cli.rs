@@ -47,6 +47,15 @@ pub enum Command {
     /// Find the tightest bbox around the input's non-transparent pixels.
     /// Prints `x y width height` to stdout.
     Bbox(BboxArgs),
+    /// Print shell completion script to stdout (eval / save it to your fpath).
+    Completions(CompletionsArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct CompletionsArgs {
+    /// Shell to emit completions for.
+    #[arg(value_enum)]
+    pub shell: clap_complete::Shell,
 }
 
 #[derive(Debug, Args)]
@@ -218,8 +227,20 @@ pub struct WatermarkArgs {
 
 #[derive(Debug, Args)]
 pub struct CompressArgs {
-    #[command(flatten)]
-    pub io: CommonIo,
+    /// Input image paths (one or more). Use `-` for stdin (single input only).
+    /// With multiple inputs, `--output` must be a directory (created if needed),
+    /// or omitted (each compressed file is written next to its source).
+    #[arg(value_name = "INPUT", required = true, num_args = 1..)]
+    pub inputs: Vec<PathBuf>,
+
+    /// Output path. With one input: file or `-` for stdout. With multiple inputs:
+    /// must be a directory.
+    #[arg(short, long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+
+    /// Force output format. Default: inferred from output path extension.
+    #[arg(short = 'f', long, value_enum, default_value_t = Format::Auto)]
+    pub format: Format,
 
     /// Format-native quality (0–100). Lossy formats only.
     /// Without this flag the encoder picks the visually-lossless default

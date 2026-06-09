@@ -16,6 +16,7 @@ path = "src/main.rs"
 nupic-core = { workspace = true, features = ["clap"] }
 anyhow = { workspace = true }
 clap = { workspace = true }
+clap_complete = { workspace = true }
 image = { workspace = true }
 
 [dev-dependencies]

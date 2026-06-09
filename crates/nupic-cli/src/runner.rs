@@ -9,9 +9,11 @@ use nupic_core::{
     ResizeOpts, Size, WatermarkContent, WatermarkOpts, alpha_bbox, metrics,
 };
 
+use clap::CommandFactory;
+
 use crate::cli::{
-    BboxArgs, Cli, CircleArgs, Command, CommonIo, CompareArgs, CompressArgs, CropArgs, DenoiseArgs,
-    FilterArgs, FitArgs, MockArgs, MockStyleArg, ResizeArgs, WatermarkArgs,
+    BboxArgs, Cli, CircleArgs, Command, CommonIo, CompareArgs, CompletionsArgs, CompressArgs,
+    CropArgs, DenoiseArgs, FilterArgs, FitArgs, MockArgs, MockStyleArg, ResizeArgs, WatermarkArgs,
 };
 
 pub fn run(args: Cli) -> Result<()> {
@@ -28,7 +30,15 @@ pub fn run(args: Cli) -> Result<()> {
         Command::Filter(args) => run_filter(args),
         Command::Denoise(args) => run_denoise(args),
         Command::Bbox(args) => run_bbox(args),
+        Command::Completions(args) => run_completions(args),
     }
+}
+
+fn run_completions(args: CompletionsArgs) -> Result<()> {
+    let mut cmd = Cli::command();
+    let bin_name = cmd.get_name().to_string();
+    clap_complete::generate(args.shell, &mut cmd, bin_name, &mut std::io::stdout());
+    Ok(())
 }
 
 fn run_denoise(args: DenoiseArgs) -> Result<()> {
@@ -210,26 +220,120 @@ fn run_watermark(args: WatermarkArgs) -> Result<()> {
 }
 
 fn run_compress(args: CompressArgs) -> Result<()> {
-    let img = decode_input(&args.io.input)?;
-    let output_path = derive_output_path(&args.io, "compressed");
-    let format = resolve_format(&args.io, output_path.as_deref())?;
+    let inputs = &args.inputs;
+    if inputs.is_empty() {
+        return Err(anyhow!("compress requires at least one INPUT path"));
+    }
+
+    let output_mode = resolve_output_mode(&args.output, inputs.len())?;
     let quality = build_quality(&args)?;
-    let opts = CompressOpts {
-        format,
-        quality,
-        strip_metadata: args.strip_metadata,
-        effort: args.effort,
-    };
-    let encoded = img.compress(opts)?;
-    write_bytes_output(output_path.as_deref(), &encoded.bytes)?;
-    log_written(
-        output_path.as_deref(),
-        encoded.bytes.len(),
-        encoded.format,
-        encoded.size.width,
-        encoded.size.height,
-    );
+    for input in inputs {
+        let img = decode_input(input)?;
+        let per_output = match &output_mode {
+            OutputMode::SingleFile(path) => path.clone(),
+            OutputMode::Directory(dir) => derive_into_dir(dir, input, args.format, "compressed"),
+            OutputMode::Auto => derive_next_to_input(input, args.format, "compressed"),
+            OutputMode::Stdout => PathBuf::from("-"),
+        };
+        let format = resolve_compress_format(args.format, &per_output)?;
+        let opts = CompressOpts {
+            format,
+            quality,
+            strip_metadata: args.strip_metadata,
+            effort: args.effort,
+        };
+        let encoded = img.compress(opts)?;
+        write_bytes_output(Some(&per_output), &encoded.bytes)?;
+        log_written(
+            Some(&per_output),
+            encoded.bytes.len(),
+            encoded.format,
+            encoded.size.width,
+            encoded.size.height,
+        );
+    }
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+enum OutputMode {
+    SingleFile(PathBuf),
+    Directory(PathBuf),
+    Auto,
+    Stdout,
+}
+
+fn resolve_output_mode(output: &Option<PathBuf>, input_count: usize) -> Result<OutputMode> {
+    let Some(path) = output else {
+        return Ok(OutputMode::Auto);
+    };
+    if path.as_os_str() == "-" {
+        if input_count > 1 {
+            return Err(anyhow!("stdout output (-) requires a single input"));
+        }
+        return Ok(OutputMode::Stdout);
+    }
+    // Heuristic: if path exists and is a dir, OR path ends with separator,
+    // OR there are multiple inputs, treat as dir.
+    let looks_like_dir = path.is_dir()
+        || path.as_os_str().to_string_lossy().ends_with(std::path::MAIN_SEPARATOR)
+        || input_count > 1;
+    if looks_like_dir {
+        fs::create_dir_all(path)
+            .with_context(|| format!("failed to create directory {}", path.display()))?;
+        return Ok(OutputMode::Directory(path.clone()));
+    }
+    Ok(OutputMode::SingleFile(path.clone()))
+}
+
+fn derive_into_dir(dir: &Path, input: &Path, format: Format, suffix: &str) -> PathBuf {
+    let stem = input
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "image".to_string());
+    let ext = if format != Format::Auto {
+        format.extension().to_string()
+    } else {
+        input
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "png".to_string())
+    };
+    dir.join(format!("{stem}.{suffix}.{ext}"))
+}
+
+fn derive_next_to_input(input: &Path, format: Format, suffix: &str) -> PathBuf {
+    let stem = input
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "image".to_string());
+    let ext = if format != Format::Auto {
+        format.extension().to_string()
+    } else {
+        input
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "png".to_string())
+    };
+    let parent = input.parent().unwrap_or(Path::new("."));
+    parent.join(format!("{stem}.{suffix}.{ext}"))
+}
+
+fn resolve_compress_format(flag: Format, output_path: &Path) -> Result<Format> {
+    if flag != Format::Auto {
+        return Ok(flag);
+    }
+    if output_path.as_os_str() == "-" {
+        return Err(anyhow!(
+            "stdout output needs an explicit --format (no path extension to infer from)"
+        ));
+    }
+    Format::from_path(output_path).ok_or_else(|| {
+        anyhow!(
+            "could not infer output format from {} — pass --format",
+            output_path.display()
+        )
+    })
 }
 
 // ---------------- shared IO ----------------
@@ -313,24 +417,6 @@ fn derive_output_path(io_args: &CommonIo, suffix: &str) -> Option<PathBuf> {
         .unwrap_or_else(|| "out".to_string());
     let parent = input.parent().unwrap_or(Path::new("."));
     Some(parent.join(format!("{stem}.{suffix}.{ext}")))
-}
-
-/// Resolve the output format from CLI flag + output path. Never returns
-/// [`Format::Auto`].
-fn resolve_format(io_args: &CommonIo, output_path: Option<&Path>) -> Result<Format> {
-    if io_args.format != Format::Auto {
-        return Ok(io_args.format);
-    }
-    if let Some(p) = output_path {
-        if p.as_os_str() != "-" {
-            if let Some(f) = Format::from_path(p) {
-                return Ok(f);
-            }
-        }
-    }
-    Err(anyhow!(
-        "could not infer output format — pass --format or use an output path with a known extension"
-    ))
 }
 
 fn build_quality(args: &CompressArgs) -> Result<Quality> {
