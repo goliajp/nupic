@@ -12,8 +12,9 @@ use nupic_core::{
 use clap::CommandFactory;
 
 use crate::cli::{
-    BboxArgs, Cli, CircleArgs, Command, CommonIo, CompareArgs, CompletionsArgs, CompressArgs,
-    CropArgs, DenoiseArgs, FilterArgs, FitArgs, MockArgs, MockStyleArg, ResizeArgs, WatermarkArgs,
+    BboxArgs, BenchArgs, Cli, CircleArgs, Command, CommonIo, CompareArgs, CompletionsArgs,
+    CompressArgs, CropArgs, DenoiseArgs, FilterArgs, FitArgs, MockArgs, MockStyleArg, ResizeArgs,
+    WatermarkArgs,
 };
 
 pub fn run(args: Cli) -> Result<()> {
@@ -31,6 +32,172 @@ pub fn run(args: Cli) -> Result<()> {
         Command::Denoise(args) => run_denoise(args),
         Command::Bbox(args) => run_bbox(args),
         Command::Completions(args) => run_completions(args),
+        Command::Bench(args) => run_bench(args),
+    }
+}
+
+fn run_bench(args: BenchArgs) -> Result<()> {
+    let formats = parse_formats(&args.formats)?;
+
+    let mut inputs: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(&args.dataset)
+        .with_context(|| format!("could not read dataset directory {}", args.dataset.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() && Format::from_path(&path).is_some() {
+            inputs.push(path);
+        }
+    }
+    inputs.sort();
+    inputs.truncate(args.limit);
+    if inputs.is_empty() {
+        return Err(anyhow!(
+            "no image files found in {}",
+            args.dataset.display()
+        ));
+    }
+
+    println!(
+        "Benchmarking {} image(s) across {} format(s) (effort={}). DSSIM lower = better.",
+        inputs.len(),
+        formats.len(),
+        args.effort
+    );
+    println!();
+    println!(
+        "{:<32}  {:<6}  {:>10}  {:>10}  {:>10}",
+        "input", "format", "size_b", "encode_ms", "DSSIM"
+    );
+    println!("{:-<32}  {:-<6}  {:->10}  {:->10}  {:->10}", "", "", "", "", "");
+
+    // Accumulator: parallel to `formats` order, so we always print in the
+    // user-requested order.
+    let mut totals: Vec<(u64, u64, f64, usize)> = vec![(0, 0, 0.0, 0); formats.len()];
+
+    for input in &inputs {
+        let img = decode_input(input)?;
+        let name = input
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let trunc_name = truncate_left(&name, 32);
+
+        for (fmt_idx, &fmt) in formats.iter().enumerate() {
+            let opts = CompressOpts {
+                format: fmt,
+                quality: Quality::Auto,
+                strip_metadata: false,
+                effort: args.effort,
+            };
+            let t0 = std::time::Instant::now();
+            let encoded = match img.compress(opts) {
+                Ok(e) => e,
+                Err(e) => {
+                    println!(
+                        "{trunc_name:<32}  {:<6}  {:>10}  {:>10}  {:>10}    [{e}]",
+                        format_short(fmt),
+                        "—",
+                        "—",
+                        "—"
+                    );
+                    continue;
+                }
+            };
+            let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            let size = encoded.bytes.len();
+            // For DSSIM, decode the encoded bytes back. Skip if encoded format
+            // isn't decodable by us (AVIF currently).
+            let dssim = Image::decode(&encoded.bytes)
+                .ok()
+                .and_then(|distorted| metrics::compute(Metric::Dssim, &img, &distorted).ok());
+            let dssim_display = dssim
+                .map(|d| format!("{d:.5}"))
+                .unwrap_or_else(|| "—".to_string());
+
+            println!(
+                "{trunc_name:<32}  {:<6}  {size:>10}  {elapsed_ms:>10.2}  {dssim_display:>10}",
+                format_short(fmt),
+            );
+
+            let entry = &mut totals[fmt_idx];
+            entry.0 += size as u64;
+            entry.1 += (elapsed_ms as u64).max(1);
+            if let Some(d) = dssim {
+                entry.2 += d;
+            }
+            entry.3 += 1;
+        }
+    }
+
+    println!();
+    println!("Averages:");
+    println!(
+        "{:<32}  {:<6}  {:>10}  {:>10}  {:>10}",
+        "", "format", "size_b", "encode_ms", "DSSIM"
+    );
+    println!("{:-<32}  {:-<6}  {:->10}  {:->10}  {:->10}", "", "", "", "", "");
+    for (i, &fmt) in formats.iter().enumerate() {
+        let (total_size, total_ms, total_dssim, n) = totals[i];
+        if n == 0 {
+            continue;
+        }
+        let avg_size = total_size / n as u64;
+        let avg_ms = total_ms / n as u64;
+        let avg_dssim = format!("{:.5}", total_dssim / n as f64);
+        println!(
+            "{:<32}  {:<6}  {avg_size:>10}  {avg_ms:>10}  {avg_dssim:>10}",
+            "",
+            format_short(fmt),
+        );
+    }
+    Ok(())
+}
+
+fn parse_formats(s: &str) -> Result<Vec<Format>> {
+    let mut out = Vec::new();
+    for token in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+        let fmt = match token.to_ascii_lowercase().as_str() {
+            "png" => Format::Png,
+            "jpeg" | "jpg" => Format::Jpeg,
+            "webp" => Format::Webp,
+            "avif" => Format::Avif,
+            "gif" => Format::Gif,
+            "bmp" => Format::Bmp,
+            "tiff" => Format::Tiff,
+            _ => return Err(anyhow!("unknown bench format: {token}")),
+        };
+        out.push(fmt);
+    }
+    if out.is_empty() {
+        return Err(anyhow!("at least one format required"));
+    }
+    Ok(out)
+}
+
+fn truncate_left(s: &str, max_chars: usize) -> String {
+    let count = s.chars().count();
+    if count <= max_chars {
+        s.to_string()
+    } else {
+        let start = count - max_chars + 1;
+        let rest: String = s.chars().skip(start).collect();
+        format!("…{rest}")
+    }
+}
+
+fn format_short(f: Format) -> &'static str {
+    match f {
+        Format::Png => "png",
+        Format::Jpeg => "jpeg",
+        Format::Webp => "webp",
+        Format::Avif => "avif",
+        Format::Gif => "gif",
+        Format::Bmp => "bmp",
+        Format::Tiff => "tiff",
+        Format::Jxl => "jxl",
+        Format::Auto => "auto",
+        _ => "?",
     }
 }
 

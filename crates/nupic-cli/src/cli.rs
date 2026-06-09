@@ -49,6 +49,29 @@ pub enum Command {
     Bbox(BboxArgs),
     /// Print shell completion script to stdout (eval / save it to your fpath).
     Completions(CompletionsArgs),
+    /// Sweep a dataset directory across formats; report size / encode time /
+    /// DSSIM. The cement-layer baseline against which future self-built
+    /// codec stones are measured.
+    Bench(BenchArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct BenchArgs {
+    /// Directory containing images to benchmark.
+    #[arg(value_name = "DATASET")]
+    pub dataset: PathBuf,
+
+    /// Comma-separated formats to test. Default: png,jpeg,webp,avif.
+    #[arg(short = 'f', long, default_value = "png,jpeg,webp,avif")]
+    pub formats: String,
+
+    /// Maximum number of images to test (after filtering).
+    #[arg(long, default_value_t = 100)]
+    pub limit: usize,
+
+    /// AVIF encoder speed knob shortcut (effort flag for compress). 0–10.
+    #[arg(long, default_value_t = 4)]
+    pub effort: u8,
 }
 
 #[derive(Debug, Args)]
