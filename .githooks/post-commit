@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# nupic post-commit: auto-reinstall to ~/.cargo/bin if the commit touched
+# Cargo sources. Fast no-op for docs / .gitignore / non-source commits.
+#
+# Opt out per commit:
+#   SKIP_INSTALL=1 git commit ...
+
+set -uo pipefail
+
+if [[ "${SKIP_INSTALL:-}" == "1" ]]; then
+    exit 0
+fi
+
+# Only run when source / manifest / hook itself changed in this commit.
+changed=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || true)
+if ! echo "$changed" | grep -qE '^(crates/|Cargo\.(toml|lock)$|\.githooks/post-commit$)'; then
+    exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+printf '[nupic post-commit] installing → ~/.cargo/bin/nupic …\n'
+RUSTC_WRAPPER= cargo install --path crates/nupic-cli --force --quiet
+status=$?
+
+if [[ $status -eq 0 ]]; then
+    if command -v nupic >/dev/null 2>&1; then
+        printf '[nupic post-commit] %s\n' "$(nupic --version)"
+    else
+        printf '[nupic post-commit] installed (but `nupic` not on PATH — check ~/.cargo/bin)\n'
+    fi
+else
+    printf '[nupic post-commit] ⚠️  install failed (exit %d). Re-run manually: RUSTC_WRAPPER= cargo install --path crates/nupic-cli --force\n' "$status" >&2
+fi
