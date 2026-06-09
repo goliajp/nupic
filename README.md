@@ -36,7 +36,7 @@ Download the `.zip` for your architecture from the
 cargo install --git https://github.com/goliajp/nupic --branch develop nupic-cli
 
 # a specific tag
-cargo install --git https://github.com/goliajp/nupic --tag v0.2.1 nupic-cli
+cargo install --git https://github.com/goliajp/nupic --tag v0.3.4 nupic-cli
 ```
 
 Pre-built binaries for the six supported targets (mac arm/intel, linux
@@ -66,23 +66,61 @@ nupic watermark photo.jpg --text "© 2026" -p bottom-right -o photo-wm.jpg
 nupic compress photo.jpg -o photo.opt.jpg           # JPEG at q=95
 nupic compress photo.png -o photo.opt.avif          # AVIF at q=90
 nupic compress screenshot.png -o screenshot.opt.png # PNG lossless (oxipng)
-nupic compress photo.jpg -o photo.tiny.jpg -q 70    # explicit lossy when you want it
+nupic compress photo.jpg -o photo.tiny.jpg -q 70    # explicit lossy
+nupic compress *.jpg -o /tmp/out/                   # batch into a directory
+
+# perceptual quality target — encoder binary-searches the smallest q
+# that meets the metric. Working with DSSIM; SSIMULACRA2 / Butteraugli
+# reserved.
+nupic compress photo.jpg -o photo.opt.jpg --target-dssim 0.005
+
+# compare two images
+nupic compare photo.jpg photo.opt.jpg
+# DSSIM: 0.004847  (lower is better (0 = identical))
+
+# bench a dataset across formats
+nupic bench ~/Pictures/test-set --formats png,jpeg,webp,avif
+
+# filters, denoise, bbox, crop
+nupic filter photo.jpg --kind blur --amount 2 -o blurred.jpg
+nupic denoise scan.tiff --kind median --strength 2 -o cleaned.tiff
+nupic bbox masked.png            # → '100 0 600 600' to stdout
+nupic crop photo.jpg -x 10 -y 20 -W 200 -H 200 -o crop.jpg
 
 # discover everything
 nupic --help
 nupic compress --help
 ```
 
-## Day-1 op surface
+## Op surface
+
+### Image transforms
 
 | Subcommand | What it does | Today's backend |
 |---|---|---|
 | `resize` | Lanczos3 / CatmullRom / Gaussian / Bilinear / Nearest | `fast_image_resize` |
 | `fit` | `contain` / `cover` / `fill` / `inside` / `outside` (CSS `object-fit` semantics) | composes resize + crop/pad |
+| `crop` | rectangular crop, clamps to image bounds | `image` crate |
 | `circle` | alpha-mask into a circle with feathered edge | hand-rolled |
-| `mock` | placeholder image — faint diagonal-stripe bg + centered `W × H` label; `--font <path>` for CJK / custom typography | hand-rolled + `ab_glyph` |
+| `filter` | grayscale / invert / blur / sharpen / brightness / contrast / hue | `image::imageops` |
+| `denoise` | gaussian smoothing or per-channel median filter | hand-rolled + `image::imageops` |
+| `mock` | placeholder — faint diagonal-stripe bg + centered `W × H` label; `--font <path>` for CJK / custom typography | hand-rolled + `ab_glyph` |
 | `watermark` | text or image overlay, 9 anchor positions, opacity / scale; `--font <path>` for text watermarks | composes resize + alpha-over composite |
-| `compress` | PNG / JPEG / WebP (lossless **+ lossy**) / AVIF / GIF / BMP / TIFF. Defaults to **visually lossless per format** (`Quality::Auto`); `Quality::{Format, Lossless, Perceptual}` are the explicit knobs. | `oxipng` / `image` / `webp` / `ravif` |
+
+### Compression & analysis
+
+| Subcommand | What it does | Today's backend |
+|---|---|---|
+| `compress` | PNG / JPEG / WebP (lossless **+ lossy**) / AVIF / GIF / BMP / TIFF. Defaults to **visually lossless per format** (`Quality::Auto`); `Quality::{Format, Lossless, Perceptual(Dssim)}` are the explicit knobs; multi-input batch + dir output | `oxipng` / `image` / `webp` / `ravif` |
+| `compare` | per-pixel metric between two images — DSSIM today, SSIMULACRA2 / Butteraugli reserved | `dssim` |
+| `bbox` | tightest rectangle around non-transparent pixels (alpha threshold tunable) | hand-rolled |
+| `bench` | sweep a dataset across formats; per-image + average size / encode-time / DSSIM table — the cement-layer baseline self-built stones are measured against | composes compress + compare |
+
+### Shell
+
+| Subcommand | What it does |
+|---|---|
+| `completions <shell>` | print bash / zsh / fish / elvish / powershell completion script |
 
 Each of these is scheduled to be replaced by a self-built pipeline; the public
 API surface is `#[non_exhaustive]` so future additions (perceptual targets,
@@ -152,11 +190,17 @@ external surface against which each pipeline's progress is measured.
 Recurring milestones:
 
 - **0.1.x** — scaffold + 6 day-1 ops + wrapped backends + dogfood binary.
-- **0.2.x** — current. GIF / BMP / TIFF encode, lossy WebP, `--font <path>`
-  override for mock + watermark (Latin default + bring-your-own CJK).
-- **0.3.x +** *(planned)* — `metrics::{ssimulacra2, butteraugli}` + first
-  stone crate (PNG pipeline per roadmap stages 0–7); enables
-  `Quality::Perceptual` search.
+- **0.2.x** — GIF / BMP / TIFF encode, lossy WebP, `--font <path>`,
+  visually-lossless `Quality::Auto` default.
+- **0.3.x** — current. `metrics::dssim` (cement) + working
+  `Quality::Perceptual(Dssim)` binary-search; `compare`, `crop`,
+  `filter`, `denoise`, `bbox`, `bench` subcommands; batch compress;
+  shell completions. SSIMULACRA2 / Butteraugli still reserved (need
+  stone layer).
+- **0.4.x +** *(planned)* — first stone crate: DEFLATE / PNG self-built
+  pipeline per `docs/roadmap.md` stages 0–7. `nupic bench` already
+  measures the cement baseline; stones get evaluated against the same
+  table as they land.
 
 ## License
 
