@@ -330,6 +330,70 @@ fn filter_negative_blur_amount_errors() {
 }
 
 // ====================================================================
+// denoise
+// ====================================================================
+
+#[test]
+fn denoise_preserves_dimensions() {
+    use nupic_core::{DenoiseKind, DenoiseOpts};
+    let img = fixture(60, 40);
+    for kind in [DenoiseKind::Gaussian, DenoiseKind::Median] {
+        let out = img.denoise(DenoiseOpts::new(kind)).unwrap();
+        assert_eq!(out.size(), Size::new(60, 40), "{kind:?} changed size");
+    }
+}
+
+#[test]
+fn denoise_median_zero_radius_is_identity_shape() {
+    use nupic_core::{DenoiseKind, DenoiseOpts};
+    let img = fixture(60, 40);
+    let out = img
+        .denoise(DenoiseOpts::new(DenoiseKind::Median).with_strength(0.0))
+        .unwrap();
+    assert_eq!(out.size(), Size::new(60, 40));
+}
+
+#[test]
+fn denoise_median_radius_too_large_errors() {
+    use nupic_core::{DenoiseKind, DenoiseOpts};
+    let img = fixture(60, 40);
+    let err = img
+        .denoise(DenoiseOpts::new(DenoiseKind::Median).with_strength(11.0))
+        .unwrap_err();
+    assert!(matches!(err, nupic_core::Error::Invalid(_)), "got: {err:?}");
+}
+
+// ====================================================================
+// bbox
+// ====================================================================
+
+#[test]
+fn bbox_full_opaque_returns_whole_image() {
+    let img = fixture(50, 30);
+    let rect = nupic_core::alpha_bbox(&img, nupic_core::AlphaBboxOpts::default()).unwrap();
+    assert_eq!(rect.origin.x, 0);
+    assert_eq!(rect.origin.y, 0);
+    assert_eq!(rect.size.width, 50);
+    assert_eq!(rect.size.height, 30);
+}
+
+#[test]
+fn bbox_after_circle_mask_is_inscribed_square() {
+    // Circle mask on a 100×100 produces an inscribed circle (radius 50,
+    // centered). Bbox of the non-zero alpha = the inscribed square 0..=99.
+    let img = fixture(100, 100)
+        .circle(nupic_core::CircleOpts {
+            radius: None,
+            feather: 0,
+        })
+        .unwrap();
+    let rect = nupic_core::alpha_bbox(&img, nupic_core::AlphaBboxOpts::default()).unwrap();
+    // Inscribed circle in a 100×100 covers x ∈ [0, 99], y ∈ [0, 99].
+    assert_eq!(rect.size.width, 100);
+    assert_eq!(rect.size.height, 100);
+}
+
+// ====================================================================
 // metrics
 // ====================================================================
 

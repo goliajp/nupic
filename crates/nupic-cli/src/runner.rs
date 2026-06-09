@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use nupic_core::{
-    CircleOpts, Color, CompressOpts, CropOpts, FilterOpts, FitOpts, Font, Format, Image, Metric,
-    MockOpts, MockStyle, PerceptualTarget, Quality, Rect, ResizeMode, ResizeOpts, Size,
-    WatermarkContent, WatermarkOpts, metrics,
+    AlphaBboxOpts, CircleOpts, Color, CompressOpts, CropOpts, DenoiseOpts, FilterOpts, FitOpts,
+    Font, Format, Image, Metric, MockOpts, MockStyle, PerceptualTarget, Quality, Rect, ResizeMode,
+    ResizeOpts, Size, WatermarkContent, WatermarkOpts, alpha_bbox, metrics,
 };
 
 use crate::cli::{
-    Cli, CircleArgs, Command, CommonIo, CompareArgs, CompressArgs, CropArgs, FilterArgs, FitArgs,
-    MockArgs, MockStyleArg, ResizeArgs, WatermarkArgs,
+    BboxArgs, Cli, CircleArgs, Command, CommonIo, CompareArgs, CompressArgs, CropArgs, DenoiseArgs,
+    FilterArgs, FitArgs, MockArgs, MockStyleArg, ResizeArgs, WatermarkArgs,
 };
 
 pub fn run(args: Cli) -> Result<()> {
@@ -26,7 +26,31 @@ pub fn run(args: Cli) -> Result<()> {
         Command::Compare(args) => run_compare(args),
         Command::Crop(args) => run_crop(args),
         Command::Filter(args) => run_filter(args),
+        Command::Denoise(args) => run_denoise(args),
+        Command::Bbox(args) => run_bbox(args),
     }
+}
+
+fn run_denoise(args: DenoiseArgs) -> Result<()> {
+    let img = decode_input(&args.io.input)?;
+    let opts = DenoiseOpts::new(args.kind).with_strength(args.strength);
+    let result = img.denoise(opts)?;
+    write_image_output(&result, &args.io, "denoise")
+}
+
+fn run_bbox(args: BboxArgs) -> Result<()> {
+    let img = decode_input(&args.input)?;
+    let rect = alpha_bbox(
+        &img,
+        AlphaBboxOpts {
+            threshold: args.threshold,
+        },
+    )?;
+    println!(
+        "{} {} {} {}",
+        rect.origin.x, rect.origin.y, rect.size.width, rect.size.height
+    );
+    Ok(())
 }
 
 fn run_crop(args: CropArgs) -> Result<()> {

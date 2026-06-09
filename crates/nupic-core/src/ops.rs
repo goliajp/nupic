@@ -14,6 +14,7 @@
 pub mod circle;
 pub mod compress;
 pub mod crop;
+pub mod denoise;
 pub mod filter;
 pub mod fit;
 pub mod mock;

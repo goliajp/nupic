@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use nupic_core::{Filter, FilterKind, FitMode, Format, Metric, Position};
+use nupic_core::{DenoiseKind, Filter, FilterKind, FitMode, Format, Metric, Position};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -42,6 +42,11 @@ pub enum Command {
     Crop(CropArgs),
     /// Pixel-space filter (blur, sharpen, grayscale, hue, …).
     Filter(FilterArgs),
+    /// Denoise: gaussian blur or per-channel median filter.
+    Denoise(DenoiseArgs),
+    /// Find the tightest bbox around the input's non-transparent pixels.
+    /// Prints `x y width height` to stdout.
+    Bbox(BboxArgs),
 }
 
 #[derive(Debug, Args)]
@@ -293,6 +298,32 @@ pub struct FilterArgs {
     /// contrast → percent; hue → degrees. Default = per-kind sensible value.
     #[arg(short = 'a', long)]
     pub amount: Option<f32>,
+}
+
+#[derive(Debug, Args)]
+pub struct DenoiseArgs {
+    #[command(flatten)]
+    pub io: CommonIo,
+
+    /// Denoise mode.
+    #[arg(short = 'k', long, value_enum, default_value_t = DenoiseKind::Median)]
+    pub kind: DenoiseKind,
+
+    /// Strength: gaussian = sigma in px; median = window radius (1 → 3×3 …).
+    #[arg(short = 's', long, default_value_t = 1.0)]
+    pub strength: f32,
+}
+
+#[derive(Debug, Args)]
+pub struct BboxArgs {
+    /// Input image path.
+    #[arg(value_name = "INPUT")]
+    pub input: PathBuf,
+
+    /// Alpha threshold (0..=255). Pixels with alpha strictly greater
+    /// count as content. Default 0.
+    #[arg(long, default_value_t = 0)]
+    pub threshold: u8,
 }
 
 #[derive(Debug, Args)]

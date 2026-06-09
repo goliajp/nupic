@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::error::Result;
 use crate::geom::Size;
-use crate::ops::{circle, compress, crop, filter, fit, resize, watermark};
+use crate::ops::{circle, compress, crop, denoise, filter, fit, resize, watermark};
 
 /// In-memory image handle.
 ///
@@ -72,6 +72,12 @@ impl Image {
     /// See [`crate::FilterOpts`].
     pub fn filter(&self, opts: filter::FilterOpts) -> Result<Self> {
         filter::filter(self.clone(), opts)
+    }
+
+    /// Denoise the image (Gaussian smoothing or per-channel median filter).
+    /// See [`crate::DenoiseOpts`].
+    pub fn denoise(&self, opts: denoise::DenoiseOpts) -> Result<Self> {
+        denoise::denoise(self.clone(), opts)
     }
 
     /// Overlay a watermark. See [`crate::WatermarkOpts`].
