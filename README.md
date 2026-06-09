@@ -12,17 +12,37 @@ information-theoretic / perceptual upper bound — see
 
 ## Install
 
-```bash
-# from source (latest develop)
-cargo install --git https://github.com/goliajp/nupic --branch develop nupic-cli
+### One-liner (macOS, Linux)
 
-# from a tagged release
-cargo install --git https://github.com/goliajp/nupic --tag v0.1.2 nupic-cli
+```bash
+curl -sSL https://raw.githubusercontent.com/goliajp/nupic/develop/scripts/install.sh | bash
 ```
 
-Pre-built binaries for the six supported targets (mac arm/intel, linux x64/arm,
-win x64/arm) are published on the
-[Releases page](https://github.com/goliajp/nupic/releases) for every `v*.*.*` tag.
+Detects your platform, downloads the latest release archive, verifies
+SHA-256, and installs to `~/.local/bin/nupic`. Override the install
+location with `INSTALL_DIR=/usr/local/bin` (and run with `sudo` if it's
+system-owned). Pin a version with `NUPIC_TAG=v0.1.4`.
+
+### Windows
+
+Download the `.zip` for your architecture from the
+[Releases page](https://github.com/goliajp/nupic/releases), extract
+`nupic.exe`, and add its folder to `PATH`.
+
+### From source
+
+```bash
+# latest from develop
+cargo install --git https://github.com/goliajp/nupic --branch develop nupic-cli
+
+# a specific tag
+cargo install --git https://github.com/goliajp/nupic --tag v0.1.4 nupic-cli
+```
+
+Pre-built binaries for the six supported targets (mac arm/intel, linux
+x64/arm, win x64/arm) are published on the
+[Releases page](https://github.com/goliajp/nupic/releases) for every
+`v*.*.*` tag.
 
 ## Quick start
 
