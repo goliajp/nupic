@@ -284,7 +284,10 @@ fn build_quality(args: &CompressArgs) -> Result<Quality> {
     if let Some(dist) = args.target_butteraugli {
         return Ok(Quality::Perceptual(PerceptualTarget::Butteraugli(dist)));
     }
-    Ok(Quality::Format(args.quality))
+    if let Some(q) = args.quality {
+        return Ok(Quality::Format(q));
+    }
+    Ok(Quality::Auto)
 }
 
 fn build_resize_mode(args: &ResizeArgs) -> Result<ResizeMode> {

@@ -7,20 +7,26 @@ use crate::image_handle::Image;
 
 /// Encoding quality.
 ///
+/// `Auto` resolves to a sensible per-format **visually lossless** default
+/// (true `Lossless` for PNG/WebP/GIF/BMP/TIFF; JPEG `q=95`; AVIF `q=90`).
+///
 /// `Format(u8)` and `Lossless` are direct codec-level knobs. `Perceptual`
 /// expresses *intent* — "produce the smallest file that meets this perceptual
 /// quality" — which today's mature-crate implementations approximate by
 /// binary-searching the format quality. Future self-built codecs will hit
 /// the target directly via in-loop metric optimization.
 ///
-/// `#[non_exhaustive]` — additional perceptual targets may be added.
+/// `#[non_exhaustive]` — additional variants and perceptual targets may be added.
 #[derive(Copy, Clone, Debug)]
 #[non_exhaustive]
 pub enum Quality {
+    /// Encoder-chosen visually-lossless default per format. The library
+    /// recommendation when callers don't want to think about quality knobs.
+    Auto,
     /// Codec-native quality (0..=100). Scale meaning is codec-specific.
     Format(u8),
     /// Perceptual quality target; encoder searches for the smallest output
-    /// that meets it. Not implemented in v0.1 (needs the metrics module).
+    /// that meets it. Not implemented yet (needs the metrics module).
     Perceptual(PerceptualTarget),
     /// Mathematically lossless (PNG / WebP-lossless / AVIF-lossless / JXL-lossless).
     Lossless,
@@ -51,7 +57,7 @@ impl Default for CompressOpts {
     fn default() -> Self {
         Self {
             format: Format::Auto,
-            quality: Quality::Format(80),
+            quality: Quality::Auto,
             strip_metadata: false,
             effort: 5,
         }
@@ -116,7 +122,7 @@ fn encode_passthrough(
     name: &'static str,
 ) -> Result<Vec<u8>> {
     match opts.quality {
-        Quality::Format(_) | Quality::Lossless => {}
+        Quality::Auto | Quality::Format(_) | Quality::Lossless => {}
         Quality::Perceptual(_) => {
             // Use a leaked static str so the variant only carries &'static str.
             // `name` is fed from known compile-time constants above, so this
@@ -136,12 +142,12 @@ fn encode_passthrough(
 }
 
 fn encode_png(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
-    // PNG is always lossless on the wire; `Quality::Format` and
-    // `Quality::Lossless` both map to "compress this PNG as well as you can",
-    // controlled by `effort`. `Quality::Perceptual` would require palette
-    // quantization driven by the metric — not implemented yet.
+    // PNG is always lossless on the wire; `Auto` / `Format` / `Lossless`
+    // all map to "compress this PNG as well as you can", controlled by
+    // `effort`. `Quality::Perceptual` would require palette quantization
+    // driven by the metric — not implemented yet.
     match opts.quality {
-        Quality::Lossless | Quality::Format(_) => {}
+        Quality::Auto | Quality::Lossless | Quality::Format(_) => {}
         Quality::Perceptual(_) => {
             return Err(Error::NotImplemented(
                 "compress: perceptual quality target for PNG (palette quantization)",
@@ -166,6 +172,7 @@ fn encode_png(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
 
 fn encode_jpeg(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     let quality = match opts.quality {
+        Quality::Auto => 95, // visually lossless JPEG threshold
         Quality::Format(q) => q,
         Quality::Lossless => {
             return Err(Error::Invalid(
@@ -192,7 +199,8 @@ fn encode_jpeg(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
 
 fn encode_webp(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     match opts.quality {
-        Quality::Lossless => {
+        // Auto on WebP = lossless (visually identical, file slightly larger).
+        Quality::Auto | Quality::Lossless => {
             // image-webp (pure rust) covers lossless natively via the `image` crate.
             let mut out = Vec::new();
             img.inner()
@@ -220,6 +228,7 @@ fn encode_avif(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
 
     // ravif quality: 1 (worst) ..= 100 (best). Lossless = 100 + speed mapping.
     let (quality, speed) = match opts.quality {
+        Quality::Auto => (90.0, effort_to_speed(opts.effort)), // visually lossless AVIF
         Quality::Format(q) => (q.min(100) as f32, effort_to_speed(opts.effort)),
         Quality::Lossless => (100.0, effort_to_speed(opts.effort)),
         Quality::Perceptual(_) => {

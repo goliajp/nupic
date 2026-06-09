@@ -36,7 +36,7 @@ Download the `.zip` for your architecture from the
 cargo install --git https://github.com/goliajp/nupic --branch develop nupic-cli
 
 # a specific tag
-cargo install --git https://github.com/goliajp/nupic --tag v0.2.0 nupic-cli
+cargo install --git https://github.com/goliajp/nupic --tag v0.2.1 nupic-cli
 ```
 
 Pre-built binaries for the six supported targets (mac arm/intel, linux
@@ -62,9 +62,11 @@ nupic circle photo.jpg --feather 2 -o avatar.png
 # text watermark, bottom-right
 nupic watermark photo.jpg --text "© 2026" -p bottom-right -o photo-wm.jpg
 
-# format-aware compression
-nupic compress photo.jpg -o photo.avif -q 60 --effort 5
-nupic compress screenshot.png -o screenshot.opt.png         # PNG via oxipng
+# format-aware compression — defaults to visually lossless per format
+nupic compress photo.jpg -o photo.opt.jpg           # JPEG at q=95
+nupic compress photo.png -o photo.opt.avif          # AVIF at q=90
+nupic compress screenshot.png -o screenshot.opt.png # PNG lossless (oxipng)
+nupic compress photo.jpg -o photo.tiny.jpg -q 70    # explicit lossy when you want it
 
 # discover everything
 nupic --help
@@ -80,7 +82,7 @@ nupic compress --help
 | `circle` | alpha-mask into a circle with feathered edge | hand-rolled |
 | `mock` | placeholder image — faint diagonal-stripe bg + centered `W × H` label; `--font <path>` for CJK / custom typography | hand-rolled + `ab_glyph` |
 | `watermark` | text or image overlay, 9 anchor positions, opacity / scale; `--font <path>` for text watermarks | composes resize + alpha-over composite |
-| `compress` | PNG / JPEG / WebP (lossless **+ lossy**) / AVIF / GIF / BMP / TIFF (`Quality::Format` / `Lossless` / `Perceptual` ceiling enum) | `oxipng` / `image` / `webp` / `ravif` |
+| `compress` | PNG / JPEG / WebP (lossless **+ lossy**) / AVIF / GIF / BMP / TIFF. Defaults to **visually lossless per format** (`Quality::Auto`); `Quality::{Format, Lossless, Perceptual}` are the explicit knobs. | `oxipng` / `image` / `webp` / `ravif` |
 
 Each of these is scheduled to be replaced by a self-built pipeline; the public
 API surface is `#[non_exhaustive]` so future additions (perceptual targets,

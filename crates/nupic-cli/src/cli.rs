@@ -210,14 +210,15 @@ pub struct CompressArgs {
     #[command(flatten)]
     pub io: CommonIo,
 
-    /// Format-native quality (0–100). Lossy formats only. Default 80.
+    /// Format-native quality (0–100). Lossy formats only.
+    /// Without this flag the encoder picks the visually-lossless default
+    /// per format (Lossless for PNG/WebP/GIF/BMP/TIFF, 95 for JPEG, 90 for AVIF).
     #[arg(
         short = 'q',
         long,
-        default_value_t = 80,
         conflicts_with_all = ["lossless", "target_ssim", "target_butteraugli"],
     )]
-    pub quality: u8,
+    pub quality: Option<u8>,
 
     /// Force lossless encoding (PNG / WebP-lossless / AVIF-lossless / JXL-lossless).
     #[arg(long, conflicts_with_all = ["target_ssim", "target_butteraugli"])]
