@@ -257,6 +257,71 @@ fn webp_lossless_encode_decode_round_trip_keeps_dimensions() {
 // Image::open / save round trip via filesystem
 // ====================================================================
 
+// ====================================================================
+// metrics
+// ====================================================================
+
+#[test]
+fn dssim_self_is_zero() {
+    let img = fixture(60, 40);
+    let score = nupic_core::metrics::dssim(&img, &img).unwrap();
+    assert!(
+        score < 1e-6,
+        "expected ~0 for identical images, got {score}"
+    );
+}
+
+#[test]
+fn dssim_different_sizes_errors() {
+    let a = fixture(60, 40);
+    let b = fixture(50, 40);
+    let err = nupic_core::metrics::dssim(&a, &b).unwrap_err();
+    assert!(matches!(err, nupic_core::Error::Invalid(_)), "got: {err:?}");
+}
+
+#[test]
+fn dssim_via_compute_matches_direct_call() {
+    let img = fixture(60, 40);
+    let direct = nupic_core::metrics::dssim(&img, &img).unwrap();
+    let via = nupic_core::metrics::compute(nupic_core::Metric::Dssim, &img, &img).unwrap();
+    assert_eq!(direct, via);
+}
+
+// ====================================================================
+// perceptual quality search (compress with Quality::Perceptual)
+// ====================================================================
+
+#[test]
+fn perceptual_dssim_on_png_returns_lossless() {
+    let img = fixture(60, 40);
+    let out = img
+        .compress(CompressOpts {
+            format: Format::Png,
+            quality: Quality::Perceptual(nupic_core::PerceptualTarget::Dssim(0.01)),
+            strip_metadata: false,
+            effort: 1,
+        })
+        .unwrap();
+    assert_eq!(out.format, Format::Png);
+    // Lossless format with perceptual target should still produce valid PNG bytes.
+    assert!(out.bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+}
+
+#[test]
+fn perceptual_dssim_on_jpeg_meets_target_or_falls_back() {
+    let img = fixture(80, 60);
+    let out = img
+        .compress(CompressOpts {
+            format: Format::Jpeg,
+            quality: Quality::Perceptual(nupic_core::PerceptualTarget::Dssim(0.05)),
+            strip_metadata: false,
+            effort: 1,
+        })
+        .unwrap();
+    assert_eq!(out.format, Format::Jpeg);
+    assert!(out.bytes.starts_with(&[0xFF, 0xD8]));
+}
+
 #[test]
 fn open_save_round_trip_through_filesystem() {
     let original = fixture(64, 48);

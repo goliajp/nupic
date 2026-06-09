@@ -4,13 +4,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use nupic_core::{
-    CircleOpts, Color, CompressOpts, FitOpts, Font, Format, Image, MockOpts, MockStyle,
+    CircleOpts, Color, CompressOpts, FitOpts, Font, Format, Image, Metric, MockOpts, MockStyle,
     PerceptualTarget, Quality, ResizeMode, ResizeOpts, Size, WatermarkContent, WatermarkOpts,
+    metrics,
 };
 
 use crate::cli::{
-    Cli, CircleArgs, Command, CommonIo, CompressArgs, FitArgs, MockArgs, MockStyleArg,
-    ResizeArgs, WatermarkArgs,
+    Cli, CircleArgs, Command, CommonIo, CompareArgs, CompressArgs, FitArgs, MockArgs,
+    MockStyleArg, ResizeArgs, WatermarkArgs,
 };
 
 pub fn run(args: Cli) -> Result<()> {
@@ -22,7 +23,22 @@ pub fn run(args: Cli) -> Result<()> {
         Command::Mock(args) => run_mock(args),
         Command::Watermark(args) => run_watermark(args),
         Command::Compress(args) => run_compress(args),
+        Command::Compare(args) => run_compare(args),
     }
+}
+
+fn run_compare(args: CompareArgs) -> Result<()> {
+    let reference = decode_input(&args.reference)?;
+    let distorted = decode_input(&args.distorted)?;
+    let value = metrics::compute(args.metric, &reference, &distorted)?;
+    let (name, scale_note) = match args.metric {
+        Metric::Dssim => ("DSSIM", "lower is better (0 = identical)"),
+        Metric::Ssimulacra2 => ("SSIMULACRA2", "higher is better (100 = identical)"),
+        Metric::Butteraugli => ("Butteraugli", "lower is better (0 = identical)"),
+        _ => ("metric", ""),
+    };
+    println!("{name}: {value:.6}  ({scale_note})");
+    Ok(())
 }
 
 // ---------------- subcommand handlers ----------------
@@ -277,6 +293,9 @@ fn resolve_format(io_args: &CommonIo, output_path: Option<&Path>) -> Result<Form
 fn build_quality(args: &CompressArgs) -> Result<Quality> {
     if args.lossless {
         return Ok(Quality::Lossless);
+    }
+    if let Some(dist) = args.target_dssim {
+        return Ok(Quality::Perceptual(PerceptualTarget::Dssim(dist)));
     }
     if let Some(score) = args.target_ssim {
         return Ok(Quality::Perceptual(PerceptualTarget::Ssimulacra2(score)));

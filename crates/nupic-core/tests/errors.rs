@@ -62,13 +62,28 @@ fn compress_jxl_unsupported() {
 }
 
 #[test]
-fn compress_perceptual_not_implemented() {
-    // [v0.x cleanup] Delete when the metrics module lands SSIMULACRA2.
+fn compress_perceptual_ssimulacra2_still_not_implemented() {
+    // [v0.x cleanup] Delete when SSIMULACRA2 lands (stone-layer pipeline).
     let img = fixture(50, 50);
     let err = img
         .compress(CompressOpts {
-            format: Format::Png,
+            format: Format::Jpeg,
             quality: Quality::Perceptual(PerceptualTarget::Ssimulacra2(85.0)),
+            strip_metadata: false,
+            effort: 1,
+        })
+        .unwrap_err();
+    assert!(matches!(err, Error::NotImplemented(_)), "got: {err:?}");
+}
+
+#[test]
+fn compress_perceptual_butteraugli_still_not_implemented() {
+    // [v0.x cleanup] Delete when Butteraugli lands.
+    let img = fixture(50, 50);
+    let err = img
+        .compress(CompressOpts {
+            format: Format::Jpeg,
+            quality: Quality::Perceptual(PerceptualTarget::Butteraugli(1.0)),
             strip_metadata: false,
             effort: 1,
         })

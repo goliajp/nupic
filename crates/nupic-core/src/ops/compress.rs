@@ -34,13 +34,18 @@ pub enum Quality {
 
 /// Perceptual quality target.
 ///
-/// `#[non_exhaustive]` — more metrics (DSSIM, VMAF, learned) may be added.
+/// `#[non_exhaustive]` — more metrics (VMAF, learned) may be added.
 #[derive(Copy, Clone, Debug)]
 #[non_exhaustive]
 pub enum PerceptualTarget {
+    /// Target DSSIM distance (lower = better; 0.0 = identical).
+    /// Typical visually-lossless target: `0.005`. Working since v0.3.
+    Dssim(f32),
     /// Target SSIMULACRA2 score; higher = better quality. Typical range 70..=95.
+    /// Reserved — needs the stone-layer perceptual pipeline.
     Ssimulacra2(f32),
     /// Target Butteraugli max-distance; lower = better quality. Typical range 0.5..=3.0.
+    /// Reserved — needs the stone-layer perceptual pipeline.
     Butteraugli(f32),
 }
 
@@ -87,6 +92,9 @@ pub struct EncodedImage {
 /// The caller is expected to resolve [`Format::Auto`] before calling. Returns
 /// [`Error::Invalid`] if `opts.format == Format::Auto`.
 pub fn encode(img: &Image, opts: CompressOpts) -> Result<EncodedImage> {
+    if matches!(opts.quality, Quality::Perceptual(_)) {
+        return perceptual_search(img, opts);
+    }
     let bytes = match opts.format {
         Format::Auto => {
             return Err(Error::Invalid(
@@ -246,6 +254,100 @@ fn encode_avif(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
         .encode_rgba(img_view)
         .map_err(|e| Error::Codec(Box::new(e)))?;
     Ok(res.avif_file)
+}
+
+/// Binary-search the format-native quality knob to find the smallest output
+/// that meets the perceptual target.
+///
+/// Strategy:
+/// - Discrete search over `q ∈ 10..=100`.
+/// - At each midpoint, encode → decode → compute the metric on the original
+///   vs the decoded distorted image.
+/// - "Meets target" depends on the metric (DSSIM: score ≤ target;
+///   Ssimulacra2: score ≥ target; Butteraugli: score ≤ target).
+/// - Track the smallest `q` that meets the target; if no `q` does, fall back
+///   to the highest tried so we always return *some* bytes.
+fn perceptual_search(img: &Image, opts: CompressOpts) -> Result<EncodedImage> {
+    let target = match opts.quality {
+        Quality::Perceptual(t) => t,
+        _ => unreachable!("perceptual_search called with non-perceptual quality"),
+    };
+    // Lossless formats sidestep search — they're already perfect.
+    match opts.format {
+        Format::Png | Format::Webp | Format::Gif | Format::Bmp | Format::Tiff => {
+            let mut lossless_opts = opts.clone();
+            lossless_opts.quality = Quality::Lossless;
+            return encode(img, lossless_opts);
+        }
+        Format::Auto | Format::Jxl => {
+            return Err(Error::Invalid(format!(
+                "perceptual target not supported on {:?}",
+                opts.format
+            )));
+        }
+        Format::Jpeg | Format::Avif => {}
+    }
+
+    let metric_fn: fn(&Image, &Image) -> Result<f64> = match target {
+        PerceptualTarget::Dssim(_) => crate::metrics::dssim,
+        PerceptualTarget::Ssimulacra2(_) => crate::metrics::ssimulacra2,
+        PerceptualTarget::Butteraugli(_) => crate::metrics::butteraugli,
+    };
+    let (target_value, lower_is_better) = match target {
+        PerceptualTarget::Dssim(t) => (f64::from(t), true),
+        PerceptualTarget::Butteraugli(t) => (f64::from(t), true),
+        PerceptualTarget::Ssimulacra2(t) => (f64::from(t), false),
+    };
+
+    let mut lo = 10u8;
+    let mut hi = 100u8;
+    let mut best: Option<(Vec<u8>, u8)> = None;
+    let mut fallback: Option<(Vec<u8>, u8)> = None;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        let mut trial = opts.clone();
+        trial.quality = Quality::Format(mid);
+        let trial_bytes = match trial.format {
+            Format::Jpeg => encode_jpeg(img, &trial)?,
+            Format::Avif => encode_avif(img, &trial)?,
+            _ => unreachable!("checked above"),
+        };
+        let decoded = Image::decode(&trial_bytes)?;
+        let score = metric_fn(img, &decoded)?;
+        let meets = if lower_is_better {
+            score <= target_value
+        } else {
+            score >= target_value
+        };
+        // Always remember the highest-quality try as a safety net.
+        fallback = Some((trial_bytes.clone(), mid));
+        if meets {
+            best = Some((trial_bytes, mid));
+            if mid == 0 {
+                break;
+            }
+            hi = mid - 1;
+        } else {
+            if mid == 100 {
+                break;
+            }
+            lo = mid + 1;
+        }
+    }
+
+    let bytes = best
+        .map(|(b, _)| b)
+        .or_else(|| fallback.map(|(b, _)| b))
+        .ok_or_else(|| {
+            Error::Invalid(format!(
+                "perceptual_search produced no candidate for {target:?}"
+            ))
+        })?;
+    Ok(EncodedImage {
+        bytes,
+        format: opts.format,
+        size: img.size(),
+    })
 }
 
 fn effort_to_speed(effort: u8) -> u8 {

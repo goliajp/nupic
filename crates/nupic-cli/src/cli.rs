@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use nupic_core::{Filter, FitMode, Format, Position};
+use nupic_core::{Filter, FitMode, Format, Metric, Position};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -36,6 +36,8 @@ pub enum Command {
     Watermark(WatermarkArgs),
     /// Re-encode an image with format-aware compression.
     Compress(CompressArgs),
+    /// Compare two images with a perceptual / structural metric.
+    Compare(CompareArgs),
 }
 
 #[derive(Debug, Args)]
@@ -216,21 +218,29 @@ pub struct CompressArgs {
     #[arg(
         short = 'q',
         long,
-        conflicts_with_all = ["lossless", "target_ssim", "target_butteraugli"],
+        conflicts_with_all = ["lossless", "target_dssim", "target_ssim", "target_butteraugli"],
     )]
     pub quality: Option<u8>,
 
     /// Force lossless encoding (PNG / WebP-lossless / AVIF-lossless / JXL-lossless).
-    #[arg(long, conflicts_with_all = ["target_ssim", "target_butteraugli"])]
+    #[arg(long, conflicts_with_all = ["target_dssim", "target_ssim", "target_butteraugli"])]
     pub lossless: bool,
+
+    /// Target DSSIM distance (lower = better; 0.0 = identical;
+    /// 0.005 ≈ visually lossless). Encoder binary-searches the smallest
+    /// output that meets this. (Working — v0.3+.)
+    #[arg(long, value_name = "DIST", conflicts_with_all = ["target_ssim", "target_butteraugli"])]
+    pub target_dssim: Option<f32>,
 
     /// Target SSIMULACRA2 score (higher = better; typical 70–95). The encoder
     /// searches for the smallest output that meets this score.
+    /// (Reserved — `NotImplemented` until the stone-layer SSIMULACRA2 lands.)
     #[arg(long, value_name = "SCORE", conflicts_with = "target_butteraugli")]
     pub target_ssim: Option<f32>,
 
     /// Target Butteraugli max-distance (lower = better; typical 0.5–3.0). The
     /// encoder searches for the smallest output that meets this distance.
+    /// (Reserved — `NotImplemented` until the stone-layer Butteraugli lands.)
     #[arg(long, value_name = "DIST")]
     pub target_butteraugli: Option<f32>,
 
@@ -241,4 +251,19 @@ pub struct CompressArgs {
     /// Encoder effort, 0 (fastest) to 10 (slowest, best compression).
     #[arg(long, default_value_t = 5)]
     pub effort: u8,
+}
+
+#[derive(Debug, Args)]
+pub struct CompareArgs {
+    /// Reference image.
+    #[arg(value_name = "REFERENCE")]
+    pub reference: PathBuf,
+
+    /// Distorted image to compare against the reference.
+    #[arg(value_name = "DISTORTED")]
+    pub distorted: PathBuf,
+
+    /// Metric to compute.
+    #[arg(short = 'm', long, value_enum, default_value_t = Metric::Dssim)]
+    pub metric: Metric,
 }

@@ -41,6 +41,7 @@ pub use format::{Filter, FitMode, Format, Position};
 pub use geom::{Point, Rect, Size};
 pub use image_handle::Image;
 
+pub use metrics::Metric;
 pub use ops::circle::CircleOpts;
 pub use ops::compress::{CompressOpts, EncodedImage, PerceptualTarget, Quality};
 pub use ops::fit::FitOpts;

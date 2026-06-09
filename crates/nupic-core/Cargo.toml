@@ -17,6 +17,8 @@ rgb = { workspace = true }
 fast_image_resize = { workspace = true }
 ab_glyph = { workspace = true }
 webp = { workspace = true }
+dssim = { workspace = true }
+imgref = { workspace = true }
 clap = { workspace = true, optional = true }
 
 [features]
