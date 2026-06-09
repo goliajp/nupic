@@ -258,6 +258,78 @@ fn webp_lossless_encode_decode_round_trip_keeps_dimensions() {
 // ====================================================================
 
 // ====================================================================
+// crop
+// ====================================================================
+
+#[test]
+fn crop_output_size_matches_rect() {
+    let img = fixture(200, 100);
+    let out = img
+        .crop(nupic_core::CropOpts::new(nupic_core::Rect::from_xywh(
+            10, 5, 80, 40,
+        )))
+        .unwrap();
+    assert_eq!(out.size(), Size::new(80, 40));
+}
+
+#[test]
+fn crop_clamps_to_image_bounds() {
+    let img = fixture(100, 100);
+    // Request rect that extends past the image. Should clamp to a 50×100 result.
+    let out = img
+        .crop(nupic_core::CropOpts::new(nupic_core::Rect::from_xywh(
+            50, 0, 200, 200,
+        )))
+        .unwrap();
+    assert_eq!(out.size(), Size::new(50, 100));
+}
+
+#[test]
+fn crop_empty_rect_errors() {
+    let img = fixture(100, 100);
+    let err = img
+        .crop(nupic_core::CropOpts::new(nupic_core::Rect::from_xywh(
+            200, 200, 50, 50,
+        )))
+        .unwrap_err();
+    assert!(matches!(err, nupic_core::Error::Invalid(_)), "got: {err:?}");
+}
+
+// ====================================================================
+// filter
+// ====================================================================
+
+#[test]
+fn filter_preserves_dimensions_for_every_variant() {
+    use nupic_core::{FilterKind, FilterOpts};
+    let img = fixture(80, 60);
+    for kind in [
+        FilterKind::Grayscale,
+        FilterKind::Invert,
+        FilterKind::Blur,
+        FilterKind::Sharpen,
+        FilterKind::Brightness,
+        FilterKind::Contrast,
+        FilterKind::Hue,
+    ] {
+        let out = img
+            .filter(FilterOpts::new(kind))
+            .unwrap_or_else(|e| panic!("{kind:?} failed: {e:?}"));
+        assert_eq!(out.size(), Size::new(80, 60), "{kind:?} changed size");
+    }
+}
+
+#[test]
+fn filter_negative_blur_amount_errors() {
+    use nupic_core::{FilterKind, FilterOpts};
+    let img = fixture(50, 50);
+    let err = img
+        .filter(FilterOpts::new(FilterKind::Blur).with_amount(-1.0))
+        .unwrap_err();
+    assert!(matches!(err, nupic_core::Error::Invalid(_)), "got: {err:?}");
+}
+
+// ====================================================================
 // metrics
 // ====================================================================
 

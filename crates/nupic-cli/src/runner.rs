@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use nupic_core::{
-    CircleOpts, Color, CompressOpts, FitOpts, Font, Format, Image, Metric, MockOpts, MockStyle,
-    PerceptualTarget, Quality, ResizeMode, ResizeOpts, Size, WatermarkContent, WatermarkOpts,
-    metrics,
+    CircleOpts, Color, CompressOpts, CropOpts, FilterOpts, FitOpts, Font, Format, Image, Metric,
+    MockOpts, MockStyle, PerceptualTarget, Quality, Rect, ResizeMode, ResizeOpts, Size,
+    WatermarkContent, WatermarkOpts, metrics,
 };
 
 use crate::cli::{
-    Cli, CircleArgs, Command, CommonIo, CompareArgs, CompressArgs, FitArgs, MockArgs,
-    MockStyleArg, ResizeArgs, WatermarkArgs,
+    Cli, CircleArgs, Command, CommonIo, CompareArgs, CompressArgs, CropArgs, FilterArgs, FitArgs,
+    MockArgs, MockStyleArg, ResizeArgs, WatermarkArgs,
 };
 
 pub fn run(args: Cli) -> Result<()> {
@@ -24,7 +24,26 @@ pub fn run(args: Cli) -> Result<()> {
         Command::Watermark(args) => run_watermark(args),
         Command::Compress(args) => run_compress(args),
         Command::Compare(args) => run_compare(args),
+        Command::Crop(args) => run_crop(args),
+        Command::Filter(args) => run_filter(args),
     }
+}
+
+fn run_crop(args: CropArgs) -> Result<()> {
+    let img = decode_input(&args.io.input)?;
+    let opts = CropOpts::new(Rect::from_xywh(args.x, args.y, args.width, args.height));
+    let result = img.crop(opts)?;
+    write_image_output(&result, &args.io, "crop")
+}
+
+fn run_filter(args: FilterArgs) -> Result<()> {
+    let img = decode_input(&args.io.input)?;
+    let mut opts = FilterOpts::new(args.kind);
+    if let Some(a) = args.amount {
+        opts = opts.with_amount(a);
+    }
+    let result = img.filter(opts)?;
+    write_image_output(&result, &args.io, "filter")
 }
 
 fn run_compare(args: CompareArgs) -> Result<()> {

@@ -13,6 +13,8 @@
 
 pub mod circle;
 pub mod compress;
+pub mod crop;
+pub mod filter;
 pub mod fit;
 pub mod mock;
 pub mod resize;

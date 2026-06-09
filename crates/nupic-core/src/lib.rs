@@ -44,6 +44,8 @@ pub use image_handle::Image;
 pub use metrics::Metric;
 pub use ops::circle::CircleOpts;
 pub use ops::compress::{CompressOpts, EncodedImage, PerceptualTarget, Quality};
+pub use ops::crop::CropOpts;
+pub use ops::filter::{FilterKind, FilterOpts};
 pub use ops::fit::FitOpts;
 pub use ops::mock::{MockOpts, MockStyle};
 pub use ops::resize::{ResizeMode, ResizeOpts};

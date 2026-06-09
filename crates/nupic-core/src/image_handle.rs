@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::error::Result;
 use crate::geom::Size;
-use crate::ops::{circle, compress, fit, resize, watermark};
+use crate::ops::{circle, compress, crop, filter, fit, resize, watermark};
 
 /// In-memory image handle.
 ///
@@ -61,6 +61,17 @@ impl Image {
     /// Mask the image into a circle. See [`crate::CircleOpts`].
     pub fn circle(&self, opts: circle::CircleOpts) -> Result<Self> {
         circle::circle(self.clone(), opts)
+    }
+
+    /// Crop to a rectangle. See [`crate::CropOpts`].
+    pub fn crop(&self, opts: crop::CropOpts) -> Result<Self> {
+        crop::crop(self.clone(), opts)
+    }
+
+    /// Apply a pixel-space filter (blur, sharpen, color adjustments, …).
+    /// See [`crate::FilterOpts`].
+    pub fn filter(&self, opts: filter::FilterOpts) -> Result<Self> {
+        filter::filter(self.clone(), opts)
     }
 
     /// Overlay a watermark. See [`crate::WatermarkOpts`].

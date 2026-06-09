@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use nupic_core::{Filter, FitMode, Format, Metric, Position};
+use nupic_core::{Filter, FilterKind, FitMode, Format, Metric, Position};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -38,6 +38,10 @@ pub enum Command {
     Compress(CompressArgs),
     /// Compare two images with a perceptual / structural metric.
     Compare(CompareArgs),
+    /// Crop to a rectangle (top-left x,y + size).
+    Crop(CropArgs),
+    /// Pixel-space filter (blur, sharpen, grayscale, hue, …).
+    Filter(FilterArgs),
 }
 
 #[derive(Debug, Args)]
@@ -251,6 +255,44 @@ pub struct CompressArgs {
     /// Encoder effort, 0 (fastest) to 10 (slowest, best compression).
     #[arg(long, default_value_t = 5)]
     pub effort: u8,
+}
+
+#[derive(Debug, Args)]
+pub struct CropArgs {
+    #[command(flatten)]
+    pub io: CommonIo,
+
+    /// Top-left X coordinate (in input image pixels). Default 0.
+    #[arg(short = 'x', long, default_value_t = 0)]
+    pub x: i32,
+
+    /// Top-left Y coordinate. Default 0.
+    #[arg(short = 'y', long, default_value_t = 0)]
+    pub y: i32,
+
+    /// Crop width in pixels.
+    #[arg(short = 'W', long)]
+    pub width: u32,
+
+    /// Crop height in pixels.
+    #[arg(short = 'H', long)]
+    pub height: u32,
+}
+
+#[derive(Debug, Args)]
+pub struct FilterArgs {
+    #[command(flatten)]
+    pub io: CommonIo,
+
+    /// Filter to apply.
+    #[arg(short = 'k', long, value_enum)]
+    pub kind: FilterKind,
+
+    /// Filter strength / parameter. Semantics depend on `--kind`:
+    /// blur / sharpen → sigma (px); brightness → [-255..=255];
+    /// contrast → percent; hue → degrees. Default = per-kind sensible value.
+    #[arg(short = 'a', long)]
+    pub amount: Option<f32>,
 }
 
 #[derive(Debug, Args)]
