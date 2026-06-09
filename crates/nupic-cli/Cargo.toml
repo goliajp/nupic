@@ -1,0 +1,22 @@
+[package]
+name = "nupic-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "nupic — nuclear picture handler CLI."
+
+[[bin]]
+name = "nupic"
+path = "src/main.rs"
+
+[dependencies]
+nupic-core = { workspace = true, features = ["clap"] }
+anyhow = { workspace = true }
+clap = { workspace = true }
+image = { workspace = true }
+
+[dev-dependencies]
+image = { workspace = true, features = ["png"] }

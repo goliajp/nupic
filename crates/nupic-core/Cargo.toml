@@ -1,0 +1,23 @@
+[package]
+name = "nupic-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Stable image-operation API for nupic. Designed ceiling-first; implementations swap from mature crates to self-built pipelines over time."
+
+[dependencies]
+thiserror = { workspace = true }
+image = { workspace = true, features = ["png", "jpeg", "webp", "gif", "bmp", "tiff"] }
+oxipng = { workspace = true }
+ravif = { workspace = true }
+rgb = { workspace = true }
+fast_image_resize = { workspace = true }
+ab_glyph = { workspace = true }
+clap = { workspace = true, optional = true }
+
+[features]
+default = []
+clap = ["dep:clap"]

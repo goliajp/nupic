@@ -1,0 +1,234 @@
+use clap::{Args, Parser, Subcommand};
+use nupic_core::{Filter, FitMode, Format, Position};
+use std::path::PathBuf;
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "nupic",
+    version,
+    about = "nupic — nuclear picture handler. Multi-pipeline image toolkit.",
+    long_about = "nupic is a cross-platform image processing CLI. Each subcommand \
+                  performs one operation; today's implementations wrap mature crates, \
+                  and are gradually replaced with self-built, zero-dep pipelines.",
+    propagate_version = true,
+    arg_required_else_help = true,
+)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Command,
+
+    /// Increase log verbosity (repeatable: -v, -vv, -vvv).
+    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
+    pub verbose: u8,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// Resize an image to specified dimensions.
+    Resize(ResizeArgs),
+    /// Fit an image into a target box (contain / cover / fill / inside / outside).
+    Fit(FitArgs),
+    /// Mask an image into a circle.
+    Circle(CircleArgs),
+    /// Generate a placeholder mockup image with a dimension label.
+    Mock(MockArgs),
+    /// Overlay a text or image watermark.
+    Watermark(WatermarkArgs),
+    /// Re-encode an image with format-aware compression.
+    Compress(CompressArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct CommonIo {
+    /// Input image path. Use '-' for stdin.
+    #[arg(value_name = "INPUT")]
+    pub input: PathBuf,
+
+    /// Output image path. Use '-' for stdout. Defaults to a derived name.
+    #[arg(short, long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+
+    /// Force output format. Default: inferred from output path extension.
+    #[arg(short = 'f', long, value_enum, default_value_t = Format::Auto)]
+    pub format: Format,
+}
+
+#[derive(Debug, Args)]
+#[group(id = "resize_target", required = true, multiple = true)]
+pub struct ResizeArgs {
+    #[command(flatten)]
+    pub io: CommonIo,
+
+    /// Target width in pixels.
+    #[arg(short = 'W', long, group = "resize_target", conflicts_with = "scale")]
+    pub width: Option<u32>,
+
+    /// Target height in pixels.
+    #[arg(short = 'H', long, group = "resize_target", conflicts_with = "scale")]
+    pub height: Option<u32>,
+
+    /// Scale factor (preserves aspect ratio). Mutually exclusive with -W / -H.
+    #[arg(long, group = "resize_target")]
+    pub scale: Option<f32>,
+
+    /// Resampling filter.
+    #[arg(long, value_enum, default_value_t = Filter::Lanczos3)]
+    pub filter: Filter,
+}
+
+#[derive(Debug, Args)]
+pub struct FitArgs {
+    #[command(flatten)]
+    pub io: CommonIo,
+
+    /// Target box width in pixels.
+    #[arg(short = 'W', long)]
+    pub width: u32,
+
+    /// Target box height in pixels.
+    #[arg(short = 'H', long)]
+    pub height: u32,
+
+    /// How the image is positioned inside the target box.
+    #[arg(short = 'm', long, value_enum, default_value_t = FitMode::Contain)]
+    pub mode: FitMode,
+
+    /// Resampling filter.
+    #[arg(long, value_enum, default_value_t = Filter::Lanczos3)]
+    pub filter: Filter,
+
+    /// Background color for padding (contain mode only).
+    /// Accepts `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`,
+    /// or `black` / `white` / `transparent`.
+    #[arg(long, default_value = "transparent")]
+    pub bg: String,
+}
+
+#[derive(Debug, Args)]
+pub struct CircleArgs {
+    #[command(flatten)]
+    pub io: CommonIo,
+
+    /// Circle radius in pixels. Default: inscribed circle of the input image.
+    #[arg(long)]
+    pub radius: Option<u32>,
+
+    /// Anti-aliasing feather width at the edge in pixels.
+    #[arg(long, default_value_t = 1)]
+    pub feather: u32,
+}
+
+#[derive(Copy, Clone, Debug, clap::ValueEnum)]
+pub enum MockStyleArg {
+    Stripes,
+    Solid,
+    Gradient,
+    Checker,
+}
+
+#[derive(Debug, Args)]
+pub struct MockArgs {
+    /// Output image path. Use '-' for stdout.
+    #[arg(short, long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+
+    /// Output format. Default: png.
+    #[arg(short = 'f', long, value_enum, default_value_t = Format::Png)]
+    pub format: Format,
+
+    /// Image width in pixels.
+    #[arg(short = 'W', long, default_value_t = 800)]
+    pub width: u32,
+
+    /// Image height in pixels.
+    #[arg(short = 'H', long, default_value_t = 600)]
+    pub height: u32,
+
+    /// Placeholder style.
+    #[arg(long, value_enum, default_value_t = MockStyleArg::Stripes)]
+    pub style: MockStyleArg,
+
+    /// Checker tile size in pixels (only with `--style checker`).
+    #[arg(long, default_value_t = 32)]
+    pub tile: u32,
+
+    /// Background color. Accepts `#rgb` / `#rgba` / `#rrggbb` / `#rrggbbaa`
+    /// or `black` / `white` / `transparent`.
+    #[arg(long, default_value = "#e5e7eb")]
+    pub bg: String,
+
+    /// Foreground (label) color.
+    #[arg(long, default_value = "#374151")]
+    pub fg: String,
+
+    /// Custom label text. Default: "<W> × <H>".
+    #[arg(long)]
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct WatermarkArgs {
+    #[command(flatten)]
+    pub io: CommonIo,
+
+    /// Watermark text. Mutually exclusive with `--image`.
+    #[arg(long, conflicts_with = "image", required_unless_present = "image")]
+    pub text: Option<String>,
+
+    /// Watermark image path. Mutually exclusive with `--text`.
+    #[arg(long, conflicts_with = "text", required_unless_present = "text")]
+    pub image: Option<PathBuf>,
+
+    /// Anchor position.
+    #[arg(short = 'p', long, value_enum, default_value_t = Position::BottomRight)]
+    pub position: Position,
+
+    /// Opacity, 0.0 (invisible) to 1.0 (opaque).
+    #[arg(long, default_value_t = 0.5)]
+    pub opacity: f32,
+
+    /// Margin from the anchor edge in pixels.
+    #[arg(long, default_value_t = 16)]
+    pub margin: u32,
+
+    /// Image-watermark scale, 0.0–1.0 of the base image width.
+    #[arg(long, default_value_t = 0.2)]
+    pub scale: f32,
+}
+
+#[derive(Debug, Args)]
+pub struct CompressArgs {
+    #[command(flatten)]
+    pub io: CommonIo,
+
+    /// Format-native quality (0–100). Lossy formats only. Default 80.
+    #[arg(
+        short = 'q',
+        long,
+        default_value_t = 80,
+        conflicts_with_all = ["lossless", "target_ssim", "target_butteraugli"],
+    )]
+    pub quality: u8,
+
+    /// Force lossless encoding (PNG / WebP-lossless / AVIF-lossless / JXL-lossless).
+    #[arg(long, conflicts_with_all = ["target_ssim", "target_butteraugli"])]
+    pub lossless: bool,
+
+    /// Target SSIMULACRA2 score (higher = better; typical 70–95). The encoder
+    /// searches for the smallest output that meets this score.
+    #[arg(long, value_name = "SCORE", conflicts_with = "target_butteraugli")]
+    pub target_ssim: Option<f32>,
+
+    /// Target Butteraugli max-distance (lower = better; typical 0.5–3.0). The
+    /// encoder searches for the smallest output that meets this distance.
+    #[arg(long, value_name = "DIST")]
+    pub target_butteraugli: Option<f32>,
+
+    /// Strip metadata (EXIF / XMP / ICC).
+    #[arg(long)]
+    pub strip_metadata: bool,
+
+    /// Encoder effort, 0 (fastest) to 10 (slowest, best compression).
+    #[arg(long, default_value_t = 5)]
+    pub effort: u8,
+}
