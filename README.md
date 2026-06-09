@@ -1,37 +1,144 @@
-# lab29-nupic
+# nupic
 
-Pure-Rust, zero-dependency image codec research project. Stand on the shoulders of every great open-source codec (pngquant / oxipng / zopfli / mozjpeg / ravif / jxl), reimplement from scratch, push to the math/physics boundary.
+> **Nu**clear **pic**ture handler — cross-platform image processing CLI, written in Rust.
 
-## 项目宪法
+`nupic` is a single-binary CLI for everyday image operations: **resize / fit /
+circle / mock / watermark / compress**, with more (denoise, upscale, similarity,
+bbox, …) planned. It is also the public face of an underlying research project:
+the implementations behind each subcommand are scheduled to be replaced one
+pipeline at a time with self-built, zero-dep, math-first codecs that aim at the
+information-theoretic / perceptual upper bound — see
+[`docs/roadmap.md`](docs/roadmap.md).
 
-1. **没有 ROI / win-risk 框架，只有数学与物理边界。** 决策依据是"信息论极限"、"感知模型极限"、"硬件极限"，不是"性价比"。
-2. **0 deps，所有路径自研。** 不引外部 codec / 算法库；可以"读论文 + 读开源实现学思想"，但代码全部自己写。
-3. **目标格式必须跨平台。** 浏览器 + iOS + Android + Win/Mac/Linux 原生可打开。如果做新格式，兼容性是硬约束。
-4. **业务无关。** 不为任何具体业务调优；目标是 codec 本身的工艺顶点。
-5. **一条 pipeline 做一条。** 不并行铺开。**第一条 pipeline 是 PNG**。
-6. **2026/6 立项。** 不接受"几十年传统不可超越"的论证。后人就是要站在前人肩膀上。
+## Install
 
-## 仓库结构
+```bash
+# from source (latest develop)
+cargo install --git https://github.com/goliajp/nupic --branch develop nupic-cli
 
-```
-lab29-nupic/
-├── README.md              # 本文件
-├── docs/
-│   ├── requirements.md    # 项目宪法的来源（用户原话 + 解读）
-│   ├── png-pipeline.md    # PNG 编码三段流水线的数学松弛分析
-│   ├── roadmap.md         # 自底向上的 8 阶段构建图 + 工程顺序
-│   └── references.md      # 关键 paper / 开源参考 / 数据集
-└── (后续 Rust 工作区在 docs 落定后建)
+# from a tagged release
+cargo install --git https://github.com/goliajp/nupic --tag v0.1.2 nupic-cli
 ```
 
-## 当前阶段
+Pre-built binaries for the six supported targets (mac arm/intel, linux x64/arm,
+win x64/arm) are published on the
+[Releases page](https://github.com/goliajp/nupic/releases) for every `v*.*.*` tag.
 
-设计期。代码 / Cargo workspace 尚未建立。
+## Quick start
 
-下一步决策点 —— 起手顺序（见 `docs/roadmap.md` 末尾）：
+```bash
+# polished placeholder for a wireframe
+nupic mock -W 800 -H 600 -o placeholder.png
 
-- A. 从 DEFLATE 写起（最底层 oracle，所有上层依赖它）
-- B. 从 OKLab + SSIMULACRA2 + 量化器 prototype 写起（先做出能数学胜过 pngquant 的 demo，DEFLATE 临时复用，后回头自研）
-- C. 先做 benchmark harness（选数据集、定 metric、跑现有 SOTA 拿全 baseline，后续每一步改进都有可信对照）
+# resize keeping aspect
+nupic resize photo.jpg -W 1024 -o photo-1024.jpg
 
-推荐顺序：**C → B → A**（先立靶子，再打靶心，最后打地基）。
+# fit into a square box (cover-crops to fill)
+nupic fit photo.jpg -W 512 -H 512 -m cover -o thumb.jpg
+
+# round avatar with anti-aliased edge
+nupic circle photo.jpg --feather 2 -o avatar.png
+
+# text watermark, bottom-right
+nupic watermark photo.jpg --text "© 2026" -p bottom-right -o photo-wm.jpg
+
+# format-aware compression
+nupic compress photo.jpg -o photo.avif -q 60 --effort 5
+nupic compress screenshot.png -o screenshot.opt.png         # PNG via oxipng
+
+# discover everything
+nupic --help
+nupic compress --help
+```
+
+## Day-1 op surface
+
+| Subcommand | What it does | Today's backend |
+|---|---|---|
+| `resize` | Lanczos3 / CatmullRom / Gaussian / Bilinear / Nearest | `fast_image_resize` |
+| `fit` | `contain` / `cover` / `fill` / `inside` / `outside` (CSS `object-fit` semantics) | composes resize + crop/pad |
+| `circle` | alpha-mask into a circle with feathered edge | hand-rolled |
+| `mock` | placeholder image — faint diagonal-stripe bg + centered `W × H` label | hand-rolled + `ab_glyph` |
+| `watermark` | text or image overlay, 9 anchor positions, opacity / scale | composes resize + alpha-over composite |
+| `compress` | PNG / JPEG / WebP-lossless / AVIF (`Quality::Format` / `Lossless` / `Perceptual` ceiling enum) | `oxipng` / `image` / `ravif` |
+
+Each of these is scheduled to be replaced by a self-built pipeline; the public
+API surface is `#[non_exhaustive]` so future additions (perceptual targets,
+new container formats, content-aware modes) slot in without SemVer breaks.
+
+## Architecture
+
+`nupic` follows the **steel-cement-stone** separation:
+
+- **cement** — `crates/nupic-cli`: the CLI shell. Allows deps. Disposable.
+- **steel** — `crates/nupic-core`: the stable public API surface (`Image`,
+  `Filter`, `FitMode`, `Quality`, `EncodedImage`, op functions). Ceiling-first
+  design — survives implementation swaps.
+- **stone** *(future)* — research-grade codec crates (`nupic-deflate`,
+  `nupic-png`, `nupic-color`, `nupic-quantize`, `nupic-ssimulacra`, …) per
+  `docs/roadmap.md`. **0 deps**, math/physics upper bound.
+
+The `Image` type is an opaque newtype — internal representation can change
+without affecting callers. Every op function takes `Opts` and `Image`,
+returns `Result<Image>` (or `Result<EncodedImage>` for `compress`), so they
+compose: `img.resize(…)?.fit(…)?.compress(…)?`.
+
+## Workflow
+
+The repo follows **classic git-flow**:
+
+- `develop` — integration branch (default)
+- `master` — production / tagged releases only
+- `feature/*` → branch off `develop`, merge back to `develop`
+- `release/*` → branch off `develop`, merge to `master` (tagged) + `develop`
+- `hotfix/*` → branch off `master`, merge to `master` + `develop`
+
+There is **no PR**: branches are integrated with `git flow feature finish` /
+`git flow release finish` locally. CI lives only on the release path —
+tag push (`v*.*.*` on `master`) → `.github/workflows/release.yml` builds the 6
+target binaries via `cargo-zigbuild` + native runners and uploads them to a
+GitHub Release.
+
+A repo-tracked `post-commit` hook (`.githooks/post-commit`) auto-reinstalls
+the binary to `~/.cargo/bin/nupic` whenever a commit touches source. Opt out
+with `SKIP_INSTALL=1 git commit …`.
+
+Configure the hook path once after cloning:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+## Versioning
+
+`0.x.y` while the API surface is still moving. The next-milestone bumps:
+
+- `0.x.0` → adding an op, changing an `Opts` shape, adding a `Quality`
+  variant, etc.
+- `0.x.y` → same-op visual / quality / perf / bugfix work.
+
+Every change that affects the produced binary bumps
+`workspace.package.version` in `Cargo.toml`, so `nupic --version` is a
+reliable dogfood waypoint.
+
+## Roadmap
+
+The headline plan is in [`docs/roadmap.md`](docs/roadmap.md): an 8-stage,
+self-built codec build-out, starting from PNG. The CLI shipped today is the
+external surface against which each pipeline's progress is measured.
+
+Recurring milestones:
+
+- **0.1.x** — current. 6 day-1 ops, wrapped backends, dogfood binary.
+- **0.2.x** *(planned)* — text-watermark sizing CLI knob, CJK / `--font`
+  override, lossy WebP, GIF/BMP/TIFF encode, perceptual quality search.
+- **0.3.x +** *(planned)* — `metrics::{ssimulacra2, butteraugli}` + first
+  stone crate (PNG pipeline per roadmap stages 0–7).
+
+## License
+
+Dual-licensed under **MIT OR Apache-2.0** — your choice.
+
+Bundled font: **Source Sans 3 Regular** (SIL Open Font License 1.1,
+Adobe 2010–2024). License text in
+`crates/nupic-core/assets/LICENSE-FONT.txt`.
