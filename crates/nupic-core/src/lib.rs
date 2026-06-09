@@ -24,6 +24,7 @@
 
 mod color;
 mod error;
+mod font;
 mod format;
 mod geom;
 mod image_handle;
@@ -35,6 +36,7 @@ pub mod ops;
 
 pub use color::Color;
 pub use error::{Error, Result};
+pub use font::Font;
 pub use format::{Filter, FitMode, Format, Position};
 pub use geom::{Point, Rect, Size};
 pub use image_handle::Image;

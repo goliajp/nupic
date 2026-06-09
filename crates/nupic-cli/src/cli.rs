@@ -164,6 +164,11 @@ pub struct MockArgs {
     /// Custom label text. Default: "<W> × <H>".
     #[arg(long)]
     pub text: Option<String>,
+
+    /// Override the bundled font with a TTF / OTF file. Useful for CJK
+    /// labels (e.g. `--font /System/Library/Fonts/PingFang.ttc`).
+    #[arg(long, value_name = "PATH")]
+    pub font: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -194,6 +199,10 @@ pub struct WatermarkArgs {
     /// Image-watermark scale, 0.0–1.0 of the base image width.
     #[arg(long, default_value_t = 0.2)]
     pub scale: f32,
+
+    /// Override the bundled font for `--text` watermarks (TTF / OTF).
+    #[arg(long, value_name = "PATH")]
+    pub font: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

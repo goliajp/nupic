@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.4"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -24,6 +24,7 @@ ravif = { version = "0.11", default-features = false, features = ["threading"] }
 rgb = "0.8"
 fast_image_resize = { version = "5", default-features = false, features = ["image", "rayon"] }
 ab_glyph = "0.2"
+webp = { version = "0.3", default-features = false, features = ["image"] }
 
 [profile.release]
 lto = "thin"

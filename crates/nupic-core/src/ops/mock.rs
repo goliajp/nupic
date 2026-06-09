@@ -2,6 +2,7 @@ use image::{DynamicImage, Rgba, RgbaImage};
 
 use crate::color::Color;
 use crate::error::{Error, Result};
+use crate::font::Font;
 use crate::geom::Size;
 use crate::image_handle::Image;
 use crate::text;
@@ -31,6 +32,8 @@ pub struct MockOpts {
     pub foreground: Color,
     /// Override the main label. `None` = render `"<width> × <height>"`.
     pub text: Option<String>,
+    /// Font used for the label. Default = bundled Source Sans 3 Regular.
+    pub font: Font,
 }
 
 impl MockOpts {
@@ -41,6 +44,7 @@ impl MockOpts {
             background: Color::rgb(0xf8, 0xfa, 0xfc), // slate-50
             foreground: Color::rgb(0x33, 0x41, 0x55), // slate-700
             text: None,
+            font: Font::default_font(),
         }
     }
 }
@@ -136,27 +140,28 @@ fn draw_label(canvas: &mut RgbaImage, opts: &MockOpts) {
     if label.is_empty() {
         return;
     }
+    let font = &opts.font;
 
     // Target the label to fill ~55% of the canvas width, capped by height.
     let max_w = (w as f32) * 0.55;
     let max_h = (h as f32) * 0.20;
     let mut px_size = ((h as f32) * 0.16).clamp(28.0, 160.0);
-    while text::text_width(&label, px_size) > max_w && px_size > 12.0 {
+    while text::text_width(font, &label, px_size) > max_w && px_size > 12.0 {
         px_size -= 1.0;
     }
-    let cap = text::cap_height(px_size);
+    let cap = text::cap_height(font, px_size);
     if cap > max_h {
         px_size *= max_h / cap;
     }
-    let cap = text::cap_height(px_size);
-    let text_w = text::text_width(&label, px_size);
-    let baseline_offset = (text::ascent(px_size) - cap).round() as i32;
+    let cap = text::cap_height(font, px_size);
+    let text_w = text::text_width(font, &label, px_size);
+    let baseline_offset = (text::ascent(font, px_size) - cap).round() as i32;
 
     let x = ((w as f32 - text_w) / 2.0).round() as i32;
     let y_cap_top = ((h as f32 - cap) / 2.0).round() as i32;
     let y = y_cap_top - baseline_offset;
 
-    text::draw_text(canvas, &label, x, y, px_size, opts.foreground, 1.0);
+    text::draw_text(canvas, &label, x, y, px_size, opts.foreground, 1.0, font);
 }
 
 // ===== color helpers =====

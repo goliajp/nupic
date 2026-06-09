@@ -16,6 +16,7 @@ ravif = { workspace = true }
 rgb = { workspace = true }
 fast_image_resize = { workspace = true }
 ab_glyph = { workspace = true }
+webp = { workspace = true }
 clap = { workspace = true, optional = true }
 
 [features]

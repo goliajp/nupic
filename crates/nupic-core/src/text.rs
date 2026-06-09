@@ -1,29 +1,22 @@
 //! TTF text rasterization for mockup labels and text watermarks.
 //!
-//! Bundles **Source Sans 3 Regular** (SIL OFL 1.1, Adobe 2010–2024) as the
-//! single default UI font. See `crates/nupic-core/assets/LICENSE-FONT.txt`.
-//!
-//! v0.2 may grow `--font <path>` and bundle CJK; today the font is fixed.
+//! Every entry point takes a `&Font` so callers can swap in CJK / display /
+//! custom fonts via `Font::from_path` without touching nupic-core.
 
-use std::sync::OnceLock;
-
-use ab_glyph::{Font, FontRef, PxScale, ScaleFont, point};
+use ab_glyph::{Font as _, FontRef, PxScale, ScaleFont, point};
 use image::{Rgba, RgbaImage};
 
 use crate::color::Color;
+use crate::font::Font;
 
-const FONT_BYTES: &[u8] = include_bytes!("../assets/SourceSans3-Regular.ttf");
-
-fn font() -> &'static FontRef<'static> {
-    static FONT: OnceLock<FontRef<'static>> = OnceLock::new();
-    FONT.get_or_init(|| {
-        FontRef::try_from_slice(FONT_BYTES).expect("bundled font must be a valid TTF")
-    })
+fn font_ref(font: &Font) -> FontRef<'_> {
+    FontRef::try_from_slice(font.as_slice())
+        .expect("Font bytes were validated at construction")
 }
 
 /// Width in pixels of a single line of `text` rasterized at `px_size`.
-pub(crate) fn text_width(text: &str, px_size: f32) -> f32 {
-    let f = font();
+pub(crate) fn text_width(font: &Font, text: &str, px_size: f32) -> f32 {
+    let f = font_ref(font);
     let s = f.as_scaled(PxScale::from(px_size));
     let mut w = 0.0f32;
     for c in text.chars() {
@@ -33,15 +26,15 @@ pub(crate) fn text_width(text: &str, px_size: f32) -> f32 {
 }
 
 /// Distance from baseline to top edge (positive, in pixels).
-pub(crate) fn ascent(px_size: f32) -> f32 {
-    let f = font();
+pub(crate) fn ascent(font: &Font, px_size: f32) -> f32 {
+    let f = font_ref(font);
     f.as_scaled(PxScale::from(px_size)).ascent()
 }
 
 /// Cap height: the height of capital letters / digits in pixels. Used for
 /// centering text optically rather than by full em-height.
-pub(crate) fn cap_height(px_size: f32) -> f32 {
-    let f = font();
+pub(crate) fn cap_height(font: &Font, px_size: f32) -> f32 {
+    let f = font_ref(font);
     let scaled = f.as_scaled(PxScale::from(px_size));
     let id = f.glyph_id('H');
     if let Some(outline) = f.outline_glyph(id.with_scale_and_position(
@@ -65,8 +58,9 @@ pub(crate) fn draw_text(
     px_size: f32,
     color: Color,
     alpha_factor: f32,
+    font: &Font,
 ) {
-    let f = font();
+    let f = font_ref(font);
     let scale = PxScale::from(px_size);
     let scaled = f.as_scaled(scale);
     let mut cursor_x = x as f32;
@@ -90,7 +84,8 @@ pub(crate) fn draw_text(
 }
 
 /// Alpha-over blend a single pixel. Public to the crate so other ops can
-/// share the same blending path.
+/// share the same blending path (e.g. circle's antialiased ring,
+/// watermark image composite).
 pub(crate) fn blend_pixel(canvas: &mut RgbaImage, x: i32, y: i32, color: Color, alpha: f32) {
     if alpha <= 0.0 || x < 0 || y < 0 {
         return;

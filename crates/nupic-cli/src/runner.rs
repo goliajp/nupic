@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use nupic_core::{
-    CircleOpts, Color, CompressOpts, FitOpts, Format, Image, MockOpts, MockStyle,
+    CircleOpts, Color, CompressOpts, FitOpts, Font, Format, Image, MockOpts, MockStyle,
     PerceptualTarget, Quality, ResizeMode, ResizeOpts, Size, WatermarkContent, WatermarkOpts,
 };
 
@@ -73,12 +73,18 @@ fn run_mock(args: MockArgs) -> Result<()> {
         MockStyleArg::Gradient => MockStyle::Gradient,
         MockStyleArg::Checker => MockStyle::Checker { tile: args.tile },
     };
+    let font = match &args.font {
+        Some(path) => Font::from_path(path)
+            .with_context(|| format!("failed to load font {}", path.display()))?,
+        None => Font::default_font(),
+    };
     let opts = MockOpts {
         size: Size::new(args.width, args.height),
         style,
         background: bg,
         foreground: fg,
         text: args.text.clone(),
+        font,
     };
     let img = nupic_core::ops::mock::render(opts)?;
 
@@ -126,6 +132,11 @@ fn run_watermark(args: WatermarkArgs) -> Result<()> {
             "internal: clap should have required --text or --image"
         ));
     };
+    let font = match &args.font {
+        Some(path) => Font::from_path(path)
+            .with_context(|| format!("failed to load font {}", path.display()))?,
+        None => Font::default_font(),
+    };
     let opts = WatermarkOpts {
         content,
         position: args.position,
@@ -133,6 +144,7 @@ fn run_watermark(args: WatermarkArgs) -> Result<()> {
         margin: args.margin,
         scale: args.scale,
         text_color: Color::WHITE,
+        font,
     };
     let result = img.watermark(opts)?;
     write_image_output(&result, &args.io, "watermarked")

@@ -36,7 +36,7 @@ Download the `.zip` for your architecture from the
 cargo install --git https://github.com/goliajp/nupic --branch develop nupic-cli
 
 # a specific tag
-cargo install --git https://github.com/goliajp/nupic --tag v0.1.4 nupic-cli
+cargo install --git https://github.com/goliajp/nupic --tag v0.2.0 nupic-cli
 ```
 
 Pre-built binaries for the six supported targets (mac arm/intel, linux
@@ -78,9 +78,9 @@ nupic compress --help
 | `resize` | Lanczos3 / CatmullRom / Gaussian / Bilinear / Nearest | `fast_image_resize` |
 | `fit` | `contain` / `cover` / `fill` / `inside` / `outside` (CSS `object-fit` semantics) | composes resize + crop/pad |
 | `circle` | alpha-mask into a circle with feathered edge | hand-rolled |
-| `mock` | placeholder image — faint diagonal-stripe bg + centered `W × H` label | hand-rolled + `ab_glyph` |
-| `watermark` | text or image overlay, 9 anchor positions, opacity / scale | composes resize + alpha-over composite |
-| `compress` | PNG / JPEG / WebP-lossless / AVIF (`Quality::Format` / `Lossless` / `Perceptual` ceiling enum) | `oxipng` / `image` / `ravif` |
+| `mock` | placeholder image — faint diagonal-stripe bg + centered `W × H` label; `--font <path>` for CJK / custom typography | hand-rolled + `ab_glyph` |
+| `watermark` | text or image overlay, 9 anchor positions, opacity / scale; `--font <path>` for text watermarks | composes resize + alpha-over composite |
+| `compress` | PNG / JPEG / WebP (lossless **+ lossy**) / AVIF / GIF / BMP / TIFF (`Quality::Format` / `Lossless` / `Perceptual` ceiling enum) | `oxipng` / `image` / `webp` / `ravif` |
 
 Each of these is scheduled to be replaced by a self-built pipeline; the public
 API surface is `#[non_exhaustive]` so future additions (perceptual targets,
@@ -149,11 +149,12 @@ external surface against which each pipeline's progress is measured.
 
 Recurring milestones:
 
-- **0.1.x** — current. 6 day-1 ops, wrapped backends, dogfood binary.
-- **0.2.x** *(planned)* — text-watermark sizing CLI knob, CJK / `--font`
-  override, lossy WebP, GIF/BMP/TIFF encode, perceptual quality search.
+- **0.1.x** — scaffold + 6 day-1 ops + wrapped backends + dogfood binary.
+- **0.2.x** — current. GIF / BMP / TIFF encode, lossy WebP, `--font <path>`
+  override for mock + watermark (Latin default + bring-your-own CJK).
 - **0.3.x +** *(planned)* — `metrics::{ssimulacra2, butteraugli}` + first
-  stone crate (PNG pipeline per roadmap stages 0–7).
+  stone crate (PNG pipeline per roadmap stages 0–7); enables
+  `Quality::Perceptual` search.
 
 ## License
 

@@ -45,40 +45,6 @@ fn compress_jpeg_lossless_errors() {
 }
 
 #[test]
-fn compress_gif_unsupported() {
-    let img = fixture(50, 50);
-    let err = img
-        .compress(CompressOpts {
-            format: Format::Gif,
-            quality: Quality::Format(80),
-            strip_metadata: false,
-            effort: 1,
-        })
-        .unwrap_err();
-    assert!(
-        matches!(err, Error::UnsupportedFormat(Format::Gif)),
-        "got: {err:?}"
-    );
-}
-
-#[test]
-fn compress_bmp_unsupported() {
-    let img = fixture(50, 50);
-    let err = img
-        .compress(CompressOpts {
-            format: Format::Bmp,
-            quality: Quality::Format(80),
-            strip_metadata: false,
-            effort: 1,
-        })
-        .unwrap_err();
-    assert!(
-        matches!(err, Error::UnsupportedFormat(Format::Bmp)),
-        "got: {err:?}"
-    );
-}
-
-#[test]
 fn compress_jxl_unsupported() {
     let img = fixture(50, 50);
     let err = img
@@ -103,21 +69,6 @@ fn compress_perceptual_not_implemented() {
         .compress(CompressOpts {
             format: Format::Png,
             quality: Quality::Perceptual(PerceptualTarget::Ssimulacra2(85.0)),
-            strip_metadata: false,
-            effort: 1,
-        })
-        .unwrap_err();
-    assert!(matches!(err, Error::NotImplemented(_)), "got: {err:?}");
-}
-
-#[test]
-fn compress_lossy_webp_not_implemented() {
-    // [v0.x cleanup] Delete when a lossy-WebP encoder is wired up.
-    let img = fixture(50, 50);
-    let err = img
-        .compress(CompressOpts {
-            format: Format::Webp,
-            quality: Quality::Format(75),
             strip_metadata: false,
             effort: 1,
         })

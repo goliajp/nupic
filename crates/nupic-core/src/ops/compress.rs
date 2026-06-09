@@ -91,7 +91,10 @@ pub fn encode(img: &Image, opts: CompressOpts) -> Result<EncodedImage> {
         Format::Jpeg => encode_jpeg(img, &opts)?,
         Format::Webp => encode_webp(img, &opts)?,
         Format::Avif => encode_avif(img, &opts)?,
-        Format::Gif | Format::Bmp | Format::Tiff | Format::Jxl => {
+        Format::Gif => encode_passthrough(img, &opts, image::ImageFormat::Gif, "GIF")?,
+        Format::Bmp => encode_passthrough(img, &opts, image::ImageFormat::Bmp, "BMP")?,
+        Format::Tiff => encode_passthrough(img, &opts, image::ImageFormat::Tiff, "TIFF")?,
+        Format::Jxl => {
             return Err(Error::UnsupportedFormat(opts.format));
         }
     };
@@ -101,6 +104,35 @@ pub fn encode(img: &Image, opts: CompressOpts) -> Result<EncodedImage> {
         format: opts.format,
         size: img.size(),
     })
+}
+
+/// Generic encode dispatch for formats handled directly by the `image` crate
+/// with no quality knob (GIF / BMP / TIFF). Rejects perceptual targets since
+/// those need a metric search loop on top of the encoder.
+fn encode_passthrough(
+    img: &Image,
+    opts: &CompressOpts,
+    image_format: image::ImageFormat,
+    name: &'static str,
+) -> Result<Vec<u8>> {
+    match opts.quality {
+        Quality::Format(_) | Quality::Lossless => {}
+        Quality::Perceptual(_) => {
+            // Use a leaked static str so the variant only carries &'static str.
+            // `name` is fed from known compile-time constants above, so this
+            // string set is bounded.
+            return Err(Error::NotImplemented(match name {
+                "GIF" => "compress: perceptual quality target for GIF",
+                "BMP" => "compress: perceptual quality target for BMP",
+                "TIFF" => "compress: perceptual quality target for TIFF",
+                _ => "compress: perceptual quality target",
+            }));
+        }
+    }
+    let mut out = Vec::new();
+    img.inner()
+        .write_to(&mut Cursor::new(&mut out), image_format)?;
+    Ok(out)
 }
 
 fn encode_png(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
@@ -159,21 +191,23 @@ fn encode_jpeg(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
 }
 
 fn encode_webp(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
-    // image-webp (pure rust) supports lossless only as of mid-2026.
-    // Lossy WebP requires a future libwebp-binding path or self-built encoder.
     match opts.quality {
-        Quality::Lossless => {}
-        Quality::Format(_) | Quality::Perceptual(_) => {
-            return Err(Error::NotImplemented(
-                "compress: lossy WebP (pure-rust encoder unavailable in v0.1; use --lossless)",
-            ));
+        Quality::Lossless => {
+            // image-webp (pure rust) covers lossless natively via the `image` crate.
+            let mut out = Vec::new();
+            img.inner()
+                .write_to(&mut Cursor::new(&mut out), image::ImageFormat::WebP)?;
+            Ok(out)
         }
+        Quality::Format(q) => {
+            // Lossy WebP via libwebp through the `webp` crate.
+            let rgba = img.inner().to_rgba8();
+            let encoder = webp::Encoder::from_rgba(rgba.as_raw(), rgba.width(), rgba.height());
+            let mem = encoder.encode(f32::from(q));
+            Ok(mem.to_vec())
+        }
+        Quality::Perceptual(_) => Err(Error::NotImplemented("compress: perceptual quality target")),
     }
-
-    let mut out = Vec::new();
-    img.inner()
-        .write_to(&mut Cursor::new(&mut out), image::ImageFormat::WebP)?;
-    Ok(out)
 }
 
 fn encode_avif(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {

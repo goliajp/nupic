@@ -2,6 +2,7 @@ use image::{DynamicImage, Rgba, RgbaImage};
 
 use crate::color::Color;
 use crate::error::{Error, Result};
+use crate::font::Font;
 use crate::format::{Filter, Position};
 use crate::image_handle::Image;
 use crate::ops::resize::resize_rgba;
@@ -33,6 +34,8 @@ pub struct WatermarkOpts {
     pub scale: f32,
     /// Text-watermark color. Ignored for image watermarks.
     pub text_color: Color,
+    /// Font used for text watermarks. Default = bundled Source Sans 3 Regular.
+    pub font: Font,
 }
 
 impl WatermarkOpts {
@@ -52,6 +55,7 @@ impl WatermarkOpts {
             margin: 16,
             scale: 0.2,
             text_color: Color::WHITE,
+            font: Font::default_font(),
         }
     }
 }
@@ -63,7 +67,15 @@ pub fn watermark(img: Image, opts: WatermarkOpts) -> Result<Image> {
 
     match opts.content {
         WatermarkContent::Text { text } => {
-            draw_text_watermark(&mut canvas, &text, opts.position, opts.margin, opacity, opts.text_color);
+            draw_text_watermark(
+                &mut canvas,
+                &text,
+                opts.position,
+                opts.margin,
+                opacity,
+                opts.text_color,
+                &opts.font,
+            );
         }
         WatermarkContent::Image(overlay) => {
             draw_image_watermark(&mut canvas, overlay, opts.position, opts.margin, opts.scale, opacity)?;
@@ -80,14 +92,15 @@ fn draw_text_watermark(
     margin: u32,
     opacity: f32,
     color: Color,
+    font: &Font,
 ) {
     let (cw, ch) = (canvas.width(), canvas.height());
     // Watermark text size: 3% of the canvas's smaller dimension, clamped.
     let px_size = (cw.min(ch) as f32 * 0.03).clamp(14.0, 64.0);
-    let tw = text::text_width(text, px_size).ceil() as u32;
-    let th = text::cap_height(px_size).ceil() as u32;
+    let tw = text::text_width(font, text, px_size).ceil() as u32;
+    let th = text::cap_height(font, px_size).ceil() as u32;
     let (x, y) = anchor_position(cw, ch, tw, th, position, margin);
-    text::draw_text(canvas, text, x, y, px_size, color, opacity);
+    text::draw_text(canvas, text, x, y, px_size, color, opacity, font);
 }
 
 fn draw_image_watermark(
