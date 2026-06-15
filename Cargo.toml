@@ -5,6 +5,7 @@ members = [
     "crates/nupic-color",
     "crates/nupic-core",
     "crates/nupic-research",
+    "crates/nupic-ssimulacra",
 ]
 
 [workspace.package]

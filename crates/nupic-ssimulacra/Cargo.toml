@@ -1,0 +1,17 @@
+[package]
+name = "nupic-ssimulacra"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Self-built SSIMULACRA2 perceptual quality metric for the nupic codec stack. Stone-layer; bit-exact agreement with `ssimulacra2` v0.5.1 reference, faster on M2 via nested rayon (row + task parallelism). API: 8-bit sRGB RGBA in, f64 score (0..=100) out."
+
+[dependencies]
+yuvxyb = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+ssimulacra2 = { workspace = true }
+image = { workspace = true, features = ["png"] }

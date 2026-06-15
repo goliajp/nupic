@@ -701,6 +701,12 @@ fn recursive_v_chunked(c: &consts::Consts, src: &[f32], dst: &mut [f32], width: 
 /// Vertical IIR over `COLUMNS` columns at once. State vectors are
 /// `3 × COLUMNS × f32`. Reads each row contiguously across the
 /// `COLUMNS` columns, then advances down — strided reads coalesce.
+///
+/// B6 micro-opts on top of B2:
+/// - lifts `if n >= 0` (loop-invariant per outer iter) outside the
+///   inner column loop so LLVM can auto-vectorise the straight-line
+///   compute path
+/// - keeps the alternative IIR recurrence cement uses; algebra unchanged
 fn recursive_v_cols<const COLUMNS: usize>(
     c: &consts::Consts,
     src: &[f32],
@@ -716,6 +722,7 @@ fn recursive_v_cols<const COLUMNS: usize>(
     let mut prev2 = [0f32; 3 * 128];
     let mut out_state = [0f32; 3 * 128];
 
+    let pole_span = 3 * COLUMNS;
     let mut n = -big_n + 1;
     while n < height as isize {
         let top = n - big_n - 1;
@@ -731,32 +738,31 @@ fn recursive_v_cols<const COLUMNS: usize>(
             zeros_view
         };
 
+        // compute new_1/3/5 for every column (always — straight-line + auto-vec)
         for i in 0..COLUMNS {
-            let sum = top_row[i] + bot_row[i];
             let i1 = i;
             let i3 = i1 + COLUMNS;
             let i5 = i3 + COLUMNS;
+            let sum = top_row[i] + bot_row[i];
 
-            // alternative recurrence form (cement vertical_pass)
             let o1 = prev[i1].mul_add(c.vert_mul_prev[0], prev2[i1]);
             let o3 = prev[i3].mul_add(c.vert_mul_prev[1], prev2[i3]);
             let o5 = prev[i5].mul_add(c.vert_mul_prev[2], prev2[i5]);
 
-            let new_1 = sum.mul_add(c.vert_mul_in[0], -o1);
-            let new_3 = sum.mul_add(c.vert_mul_in[1], -o3);
-            let new_5 = sum.mul_add(c.vert_mul_in[2], -o5);
+            out_state[i1] = sum.mul_add(c.vert_mul_in[0], -o1);
+            out_state[i3] = sum.mul_add(c.vert_mul_in[1], -o3);
+            out_state[i5] = sum.mul_add(c.vert_mul_in[2], -o5);
+        }
 
-            out_state[i1] = new_1;
-            out_state[i3] = new_3;
-            out_state[i5] = new_5;
-
-            if n >= 0 {
-                dst[n as usize * width + i] = new_1 + new_3 + new_5;
+        // write to dst only when n is in [0, height) — branch outside inner loop
+        if n >= 0 {
+            let dst_row = &mut dst[n as usize * width..n as usize * width + COLUMNS];
+            for i in 0..COLUMNS {
+                dst_row[i] = out_state[i] + out_state[i + COLUMNS] + out_state[i + 2 * COLUMNS];
             }
         }
 
         // shift prev2 ← prev; prev ← out_state
-        let pole_span = 3 * COLUMNS;
         prev2[..pole_span].copy_from_slice(&prev[..pole_span]);
         prev[..pole_span].copy_from_slice(&out_state[..pole_span]);
 
