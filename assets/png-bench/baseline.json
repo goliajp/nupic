@@ -1,0 +1,29 @@
+{
+  "collected_at": "2026-06-15",
+  "comment": "TinyPNG baseline produced via the tinypng.com web UI on 2026-06-15. Compared against nupic 0.3.4 (oxipng-only) and the upcoming 0.4.0 lossy-PNG path (imagequant + oxipng). The 0.4.0 target is `nupic_bytes <= tinypng_bytes * 1.15` on every fixture.",
+  "fixtures": {
+    "01-png-transparency-demo.png": {"input_bytes": 224566, "tinypng_bytes": 48295, "input_sha256": "c4e870d358d64ce677e958c156d0e3fba466993d8e915fc81c5dc64937a9b696"},
+    "02-pluto-transparent.png":     {"input_bytes": 472683, "tinypng_bytes": 180788, "input_sha256": "b2ddfff171ad700348571b530a556631566c40ad90e480c4683495d87e907a51"},
+    "03-wikipedia-logo.png":        {"input_bytes": 15829,  "tinypng_bytes": 13492,  "input_sha256": "75038605ff9e35cc393e0ed8200069601c889100607cde67d2af68b9eb88e5d4"},
+    "04-photo-portrait.png":        {"input_bytes": 1159107,"tinypng_bytes": 569959, "input_sha256": "ab2a2e2bf5a33b0cdb4b2cbd43d09f796a42eee8250a6839b3f0186450559392"},
+    "05-photo-mountain.png":        {"input_bytes": 1552606,"tinypng_bytes": 434250, "input_sha256": "1d8d3a61eda6a1928b609a9251d1fd482dd4460986497b6470fc43486d32347b"},
+    "06-photo-landscape.png":       {"input_bytes": 2695291,"tinypng_bytes": 1091878,"input_sha256": "3b8bd63dede03d0f14d6ad3ff5ea25cad0a5a8f41ce9fe851ee892a567831950"},
+    "07-photo-product.png":         {"input_bytes": 887025, "tinypng_bytes": 367414, "input_sha256": "932da62e1708ef3ccee777ff3f0eea7d1b877d9da8e2e749d19f2c13c45f7ad7"}
+  },
+  "totals": {
+    "input_bytes": 7007107,
+    "tinypng_bytes": 2706076,
+    "tinypng_ratio_vs_input": 0.386
+  },
+  "nupic_0_3_4_reference_bytes": {
+    "01-png-transparency-demo.png": 225727,
+    "02-pluto-transparent.png":     379876,
+    "03-wikipedia-logo.png":        14718,
+    "04-photo-portrait.png":        880939,
+    "05-photo-mountain.png":        1348699,
+    "06-photo-landscape.png":       2377470,
+    "07-photo-product.png":         646208,
+    "_total": 5873637,
+    "_ratio_vs_tinypng": 2.17
+  }
+}
