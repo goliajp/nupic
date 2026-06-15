@@ -62,18 +62,22 @@ fn compress_jxl_unsupported() {
 }
 
 #[test]
-fn compress_perceptual_ssimulacra2_still_not_implemented() {
-    // [v0.x cleanup] Delete when SSIMULACRA2 lands (stone-layer pipeline).
+fn compress_perceptual_ssimulacra2_works_in_v0_5() {
+    // 0.5.0: nupic-ssimulacra stone crate landed → SSIMULACRA2 metric
+    // is wired through perceptual_search. Confirm the JPEG path returns
+    // valid bytes (no NotImplemented).
     let img = fixture(50, 50);
-    let err = img
+    let encoded = img
         .compress(CompressOpts {
             format: Format::Jpeg,
             quality: Quality::Perceptual(PerceptualTarget::Ssimulacra2(85.0)),
             strip_metadata: false,
             effort: 1,
         })
-        .unwrap_err();
-    assert!(matches!(err, Error::NotImplemented(_)), "got: {err:?}");
+        .expect("Ssimulacra2 perceptual target should work in 0.5.0+");
+    assert_eq!(encoded.format, Format::Jpeg);
+    assert!(encoded.bytes.starts_with(&[0xFF, 0xD8]),
+        "JPEG SOI missing — bytes {:?}", &encoded.bytes[..encoded.bytes.len().min(4)]);
 }
 
 #[test]

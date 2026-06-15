@@ -297,7 +297,7 @@ pub struct CompressArgs {
 
     /// Target SSIMULACRA2 score (higher = better; typical 70–95). The encoder
     /// searches for the smallest output that meets this score.
-    /// (Reserved — `NotImplemented` until the stone-layer SSIMULACRA2 lands.)
+    /// (Working — v0.5.1+, backed by the `nupic-ssimulacra` stone crate.)
     #[arg(long, value_name = "SCORE", conflicts_with = "target_butteraugli")]
     pub target_ssim: Option<f32>,
 

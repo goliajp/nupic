@@ -1033,7 +1033,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-cli"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1046,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-color"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "fast-srgb8",
  "image",
@@ -1056,7 +1056,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "ab_glyph",
  "clap",
@@ -1066,6 +1066,7 @@ dependencies = [
  "imagequant",
  "imgref",
  "nupic-quantize",
+ "nupic-ssimulacra",
  "oxipng",
  "png",
  "ravif 0.11.20",
@@ -1076,7 +1077,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-quantize"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "image",
  "imagequant",
@@ -1090,7 +1091,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-research"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "fast-srgb8",
@@ -1112,7 +1113,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-ssimulacra"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "image",
  "rayon",
