@@ -1,0 +1,17 @@
+[package]
+name = "nupic-color"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Self-built OKLab perceptual color space for the nupic codec stack. Stone-layer; replaces ad-hoc Lab L2 math for downstream stones (SSIMULACRA2, codebook learning). API: per-pixel and tile-based slice conversion between 8-bit sRGB and OKLab f32."
+
+[dependencies]
+rgb = { workspace = true }
+fast-srgb8 = { workspace = true }
+
+[dev-dependencies]
+oklab = { workspace = true }
+image = { workspace = true, features = ["png"] }

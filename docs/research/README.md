@@ -47,7 +47,8 @@ crates/nupic-research/   ─ experiments backing the essays
 - [`png/02-perceptual-metrics.md`](png/02-perceptual-metrics.md) — 用 SSIMULACRA2 替代肉眼判断;7 图 metric 对照得 nupic 0.4 在 SSIMULACRA2 上 5/7 胜 TinyPNG;给出 metric-grounded 0.4.1 cement-fix spec(总体 0.95× TinyPNG,质量不退化)
 - [`png/03-perceptual-stone.md`](png/03-perceptual-stone.md) — stone-layer 设计 anchor;5 stones (OKLab / SSIMULACRA2 / codebook / dither / filter-search) 每个的 perf/mem/disk/cov/doc ceiling 数字 + 依赖图 + 子 essay roadmap。Ceiling-first 价值观的首次落地。
 - [`png/03a-oklab-design.md`](png/03a-oklab-design.md) — Stone A 详细设计 + 实测;naive scalar 8.18 ms / 02-pluto 精准命中 03 估计;oklab crate (LUT) 1.88 ms;距离 bandwidth ceiling 0.06 ms 还有 31×;给 stone A0→A4 attack plan。
-- [`png/03a-bis-oklab-simd.md`](png/03a-bis-oklab-simd.md) — Stone A perf 推进:LUT + Halley cbrt 2.53 ms / 02-pluto(scalar 路径当前最佳);`wide` portable SIMD 翻车(比 scalar 慢 48%);距 graduation 阈值还差 2.5×,下一 attack arm NEON specific intrinsics。
+- [`png/03a-bis-oklab-simd.md`](png/03a-bis-oklab-simd.md) — Stone A perf 推进:LUT + Halley cbrt 2.53 ms;`wide` portable SIMD 翻车;A3a FMA + Lagny scalar 0.66 ms / 02-pluto(穿过 graduation 阈值 < 1 ms)。
+- [`png/03a-ter-oklab-graduation.md`](png/03a-ter-oklab-graduation.md) — Stone A graduates 进 `crates/nupic-color/`。6 项 graduation criteria 全过(perf 0.66 ms / mem `RECOMMENDED_TILE_PIXELS` + tiled API / cov 9 props + 5 fixture + 32 K oracle assertions / doc cross-link)。Stone B unblocked。
 
 ## Companion crate
 

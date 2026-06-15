@@ -1045,6 +1045,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nupic-color"
+version = "0.4.0"
+dependencies = [
+ "fast-srgb8",
+ "image",
+ "oklab",
+ "rgb",
+]
+
+[[package]]
 name = "nupic-core"
 version = "0.4.0"
 dependencies = [
