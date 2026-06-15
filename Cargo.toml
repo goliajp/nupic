@@ -35,6 +35,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ssimulacra2 = "0.5"
 oklab = "1"
+fast-srgb8 = "1"
+wide = "0.7"
 
 [profile.release]
 lto = "thin"

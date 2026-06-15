@@ -22,3 +22,5 @@ rgb = { workspace = true }
 anyhow = { workspace = true }
 ssimulacra2 = { workspace = true }
 oklab = { workspace = true }
+fast-srgb8 = { workspace = true }
+wide = { workspace = true }
