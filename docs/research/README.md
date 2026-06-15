@@ -55,6 +55,7 @@ crates/nupic-research/   ─ experiments backing the essays
 - [`png/03b-quater-ssim-b4.md`](png/03b-quater-ssim-b4.md) — Stone B B3/B4。B3 buffer reuse hypothesis 翻车(+4-6% slow on M2);**B4 rayon parallel horizontal 跟 cement ≈ 持平**(02 0.92×, 04 1.01×, 06 1.04×);score 仍 0.0000 diff;graduation 还差 2.8×;新攻击维度 "parallelism ladder" 加进 stone-essay 模板。
 - [`png/03b-quinquies-ssim-b5.md`](png/03b-quinquies-ssim-b5.md) — Stone B B5 per-scale nested rayon。3 task streams(σ-chain / μ₁ / μ₂)× B4 row parallel inside;**B5 02 20 ms / 04 43 ms / 06 61 ms,跨图 0.69-0.84× cement**;score 仍 bit-exact;graduation 还差 2×;4 个独立 ceiling 攻击维度(codegen / memory access / row parallel / task parallel)。
 - [`png/03b-six-graduation.md`](png/03b-six-graduation.md) — Stone B graduates 进 `crates/nupic-ssimulacra/`。perf criterion 修正(原 10 ms 基于错的 cement estimate)为 ≤ 0.85× cement;实测 02 0.71× / 04 0.87× / 06 0.78× / 4K 0.76×;4K mem 跑通;9 property + 7 cement agreement 测全过 (cement diff < 0.001 vs 0.5 target);minimal public API `ssimulacra2_score` + `ssimulacra2_score_f32`。**Stone C unblocked**。
+- [`png/03c-codebook-design.md`](png/03c-codebook-design.md) — **Stone C 设计 anchor**(整个 PNG research thread 的 climax)。SSIMULACRA2-driven differentiable codebook learning;02-pluto SSIMULACRA2 -65 → ≥ 30 跃迁目标(只有 stone C 能完成);training ≤ 10 s / image,inference ≤ 2× cement;tile-based mem ≤ 100 MB / 02-pluto;依赖 Stone A (OKLab) + Stone B (SSIMULACRA2)。STE + L2-OKLab + Adam 起步,differentiable Stone B 作为 03d 候选。
 
 ## Companion crate
 
