@@ -14,6 +14,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use nupic_research::ssim_b1::{
     ssimulacra2_score_srgb,
+    ssimulacra2_score_srgb_b5,
     ssimulacra2_score_srgb_chunked,
     ssimulacra2_score_srgb_parallel,
     ssimulacra2_score_srgb_reuse,
@@ -141,15 +142,14 @@ fn time_b2(r: &[[f32; 3]], d: &[[f32; 3]], w: usize, h: usize, runs: usize) -> (
 }
 
 fn time_b3(r: &[[f32; 3]], d: &[[f32; 3]], w: usize, h: usize, runs: usize) -> (f64, f64) {
+    // Column kept as `b3` to avoid shuffling the CSV/MD header; now
+    // measures B5 = nested rayon (B4 parallel horizontal + 3 parallel
+    // blur streams per scale).
     let mut ts = Vec::with_capacity(runs);
     let mut score = 0.0f64;
     for _ in 0..runs {
         let t0 = Instant::now();
-        // B4 path: parallel horizontal pass. Renaming from "B3 reuse"
-        // since the buffer-reuse hypothesis (03b-ter) didn't beat B2;
-        // the real cement advantage was rayon. Keep the column name b3
-        // to avoid bench column shuffle; semantics changed mid-essay.
-        score = ssimulacra2_score_srgb_parallel(r, d, w, h).expect("b4-parallel");
+        score = ssimulacra2_score_srgb_b5(r, d, w, h).expect("b5-nested-rayon");
         ts.push(t0.elapsed().as_secs_f64() * 1000.0);
     }
     ts.sort_by(|a, b| a.partial_cmp(b).unwrap());

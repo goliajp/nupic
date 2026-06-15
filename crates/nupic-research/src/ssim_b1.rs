@@ -53,6 +53,78 @@ pub fn ssimulacra2_score_srgb_chunked(
     score_inner(reference, distorted, width, height, VerticalKind::Chunked)
 }
 
+/// Compute SSIMULACRA2 score with the B5 per-scale parallel blurs.
+/// On top of B4's row-level parallel horizontal,each scale's 5
+/// gaussian_blur calls split into 3 concurrent streams via rayon::join:
+///   - σ stream:(mul₁₁ → blur,mul₂₂ → blur,mul₁₂ → blur)— internally sequential
+///   - μ₁ stream:gaussian_blur(xyb1)
+///   - μ₂ stream:gaussian_blur(xyb2)
+pub fn ssimulacra2_score_srgb_b5(
+    reference: &[[f32; 3]],
+    distorted: &[[f32; 3]],
+    width: usize,
+    height: usize,
+) -> Result<f64, &'static str> {
+    if reference.len() != distorted.len() || reference.len() != width * height {
+        return Err("dimension mismatch");
+    }
+    if width < 8 || height < 8 {
+        return Err("image too small");
+    }
+    let mut img1 = build_linear(reference, width, height)?;
+    let mut img2 = build_linear(distorted, width, height)?;
+
+    let mut all_scales: Vec<MsssimScale> = Vec::with_capacity(NUM_SCALES);
+    let mut cur_w = width;
+    let mut cur_h = height;
+
+    for scale in 0..NUM_SCALES {
+        if cur_w < 8 || cur_h < 8 {
+            break;
+        }
+        if scale > 0 {
+            img1 = downscale_by_2(&img1);
+            img2 = downscale_by_2(&img2);
+            cur_w = img1.width();
+            cur_h = img1.height();
+        }
+        all_scales.push(compute_scale_b5(&img1, &img2, cur_w, cur_h));
+    }
+    Ok(aggregate_score(&all_scales))
+}
+
+fn compute_scale_b5(img1: &LinearRgb, img2: &LinearRgb, w: usize, h: usize) -> MsssimScale {
+    let xyb1 = make_positive_xyb_planar(img1);
+    let xyb2 = make_positive_xyb_planar(img2);
+
+    let xyb1_ref = &xyb1;
+    let xyb2_ref = &xyb2;
+
+    // 3 parallel streams. σ stream needs its own mul_buf; μ streams
+    // just blur xyb directly.
+    let ((sigma1_sq, sigma2_sq, sigma12), (mu1, mu2)) = rayon::join(
+        || {
+            let mut mul_buf = [vec![0f32; w * h], vec![0f32; w * h], vec![0f32; w * h]];
+            image_multiply(xyb1_ref, xyb1_ref, &mut mul_buf);
+            let s1 = gaussian_blur(&mul_buf, w, h, VerticalKind::ParallelH);
+            image_multiply(xyb2_ref, xyb2_ref, &mut mul_buf);
+            let s2 = gaussian_blur(&mul_buf, w, h, VerticalKind::ParallelH);
+            image_multiply(xyb1_ref, xyb2_ref, &mut mul_buf);
+            let s12 = gaussian_blur(&mul_buf, w, h, VerticalKind::ParallelH);
+            (s1, s2, s12)
+        },
+        || rayon::join(
+            || gaussian_blur(xyb1_ref, w, h, VerticalKind::ParallelH),
+            || gaussian_blur(xyb2_ref, w, h, VerticalKind::ParallelH),
+        ),
+    );
+
+    MsssimScale {
+        avg_ssim: ssim_map(w, h, &mu1, &mu2, &sigma1_sq, &sigma2_sq, &sigma12),
+        avg_edgediff: edge_diff_map(w, h, xyb1_ref, &mu1, xyb2_ref, &mu2),
+    }
+}
+
 /// Compute SSIMULACRA2 score with the B4 parallel horizontal pass.
 /// Chunked vertical + rayon-parallel horizontal IIR over rows. Matches
 /// cement's `feature = "rayon"` default path (which is what
