@@ -139,6 +139,52 @@ fn rgb_to_oklab_a1b(r: u8, g: u8, b: u8) -> [f32; 3] {
     ]
 }
 
+// --- A3a: scalar codegen-optimised — mul_add + Lagny cbrt + #[inline(always)] +
+// `rgb::Rgb<u8>` struct (the four codegen advantages observed in oklab v1.1.2).
+
+/// Lagny rational cube-root approximation, 1 iteration. ~24-bit precision.
+/// (Same form as oklab v1.1.2 §`cbrt`.)
+#[inline(always)]
+fn cbrt_lagny(x: f32) -> f32 {
+    const B: u32 = 709_957_561;
+    const C: f32 =  0.542_857_170_1;
+    const D: f32 = -0.705_306_112_8;
+    const E: f32 =  1.414_285_659_8;
+    const F: f32 =  1.607_142_806_1;
+    const G: f32 =  0.357_142_656_6;
+    let mut t = f32::from_bits((x.to_bits() / 3).wrapping_add(B));
+    let s = C + (t * t) * (t / x);
+    t *= G + F / (s + E + D / s);
+    t
+}
+
+#[inline(always)]
+fn linear_srgb_to_oklab_fma(r: f32, g: f32, b: f32) -> [f32; 3] {
+    // FMA-aware matmul, identical numerics to A1b but uses mul_add for
+    // every term (modulo the leading mul). LLVM emits arm `vfmla` /
+    // x86 `vfmadd` rather than separate mul+add.
+    let l = 0.0514459929f32.mul_add(b, 0.4122214708f32.mul_add(r, 0.5363325363 * g));
+    let m = 0.1073969566f32.mul_add(b, 0.2119034982f32.mul_add(r, 0.6806995451 * g));
+    let s = 0.6299787005f32.mul_add(b, 0.0883024619f32.mul_add(r, 0.2817188376 * g));
+    let lp = cbrt_lagny(l);
+    let mp = cbrt_lagny(m);
+    let sp = cbrt_lagny(s);
+    [
+        (-0.0040720468f32).mul_add(sp, 0.2104542553f32.mul_add(lp, 0.7936177850 * mp)),
+        0.4505937099f32.mul_add(sp, 1.9779984951f32.mul_add(lp, -2.4285922050 * mp)),
+        (-0.8086757660f32).mul_add(sp, 0.0259040371f32.mul_add(lp, 0.7827717662 * mp)),
+    ]
+}
+
+#[inline(always)]
+fn rgb_to_oklab_a3a(c: rgb::Rgb<u8>) -> [f32; 3] {
+    linear_srgb_to_oklab_fma(
+        fast_srgb8::srgb8_to_f32(c.r),
+        fast_srgb8::srgb8_to_f32(c.g),
+        fast_srgb8::srgb8_to_f32(c.b),
+    )
+}
+
 // --- A2: SIMD f32x4 batch (4 pixels per iter), cbrt via scalar Halley.
 // `wide::f32x4` portable SIMD wrapper.
 
@@ -259,6 +305,15 @@ fn main() -> Result<()> {
         rows.push(time_impl(name, n, "A1b-LUT-Halley", &rgba, &oracle, |rgba, out| {
             for i in 0..out.len() {
                 out[i] = rgb_to_oklab_a1b(rgba[i*4], rgba[i*4+1], rgba[i*4+2]);
+            }
+        }));
+
+        // A3a — codegen-optimised: mul_add + Lagny cbrt + RGB8 struct + inline-always
+        rows.push(time_impl(name, n, "A3a-FMA-Lagny", &rgba, &oracle, |rgba, out| {
+            for i in 0..out.len() {
+                out[i] = rgb_to_oklab_a3a(rgb::Rgb {
+                    r: rgba[i*4], g: rgba[i*4+1], b: rgba[i*4+2],
+                });
             }
         }));
 
