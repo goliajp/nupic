@@ -1088,6 +1088,7 @@ dependencies = [
  "rgb",
  "ssimulacra2",
  "wide",
+ "yuvxyb",
 ]
 
 [[package]]

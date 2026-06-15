@@ -7,5 +7,8 @@
 //! dedicated stone crate (`nupic-bits`, `nupic-deflate`, ...) when an
 //! approach becomes load-bearing.
 //!
-//! This file is intentionally empty; helpers land here only when they
-//! are reused across experiments.
+//! Modules:
+//! - [`ssim_b1`] — Stone B baseline reimpl(FMA + `#[inline(always)]`
+//!   applied,yuvxyb for color conversion). Backs essay 03b-bis.
+
+pub mod ssim_b1;

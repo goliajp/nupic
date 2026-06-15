@@ -38,6 +38,7 @@ ssimulacra2 = "0.5"
 oklab = "1"
 fast-srgb8 = "1"
 wide = "0.7"
+yuvxyb = "0.4"
 
 [profile.release]
 lto = "thin"
