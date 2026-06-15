@@ -15,6 +15,13 @@ experiments. Each essay must:
 
 Essays that don't meet these bars get rewritten, not merged.
 
+**Since [03-perceptual-stone.md](png/03-perceptual-stone.md) (2026-06-15)
+all essays additionally follow the ceiling-first priorities**: each
+section quotes a perf / mem / disk / cov / doc ceiling and the current
+distance from it, in that priority order. See
+[`feedback_ceiling_first_priorities.md`](../../../../.claude-profile-1/projects/-Users-doracawl-workspace-labs-lab29-nupic/memory/feedback_ceiling_first_priorities.md)
+in memory for the rule.
+
 ## Layout
 
 ```
@@ -38,6 +45,7 @@ crates/nupic-research/   ─ experiments backing the essays
 - [`png/00-attack-surface.md`](png/00-attack-surface.md) — anchor 篇
 - [`png/01-pluto-case.md`](png/01-pluto-case.md) — 02-pluto 上 imagequant 的 algorithmic ceiling;cement-layer adaptive q_target spec(基于 DSSIM,已被 02 supersede)
 - [`png/02-perceptual-metrics.md`](png/02-perceptual-metrics.md) — 用 SSIMULACRA2 替代肉眼判断;7 图 metric 对照得 nupic 0.4 在 SSIMULACRA2 上 5/7 胜 TinyPNG;给出 metric-grounded 0.4.1 cement-fix spec(总体 0.95× TinyPNG,质量不退化)
+- [`png/03-perceptual-stone.md`](png/03-perceptual-stone.md) — stone-layer 设计 anchor;5 stones (OKLab / SSIMULACRA2 / codebook / dither / filter-search) 每个的 perf/mem/disk/cov/doc ceiling 数字 + 依赖图 + 子 essay roadmap。Ceiling-first 价值观的首次落地。
 
 ## Companion crate
 
