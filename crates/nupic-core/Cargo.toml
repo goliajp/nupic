@@ -21,6 +21,7 @@ dssim = { workspace = true }
 imgref = { workspace = true }
 imagequant = { workspace = true }
 png = { workspace = true }
+nupic-quantize = { path = "../nupic-quantize" }
 clap = { workspace = true, optional = true }
 
 [features]

@@ -65,7 +65,8 @@ nupic watermark photo.jpg --text "© 2026" -p bottom-right -o photo-wm.jpg
 # format-aware compression — defaults to "visually lossless, smallest file"
 nupic compress photo.jpg -o photo.opt.jpg           # JPEG at q=95
 nupic compress photo.png -o photo.opt.avif          # AVIF at q=90
-nupic compress photo.png  -o photo.opt.png          # PNG: imagequant + oxipng (lossy palette quantization)
+nupic compress photo.png  -o photo.opt.png          # PNG: Stone C (OKLab argmin palette, no dither) — 0.5.0 default
+nupic compress photo.png  -o photo.opt.png -q 95    # PNG: imagequant + oxipng (0.4.x default, kept for the explicit quality knob)
 nupic compress screenshot.png -q 100 -o ss.opt.png  # PNG: true lossless (oxipng only)
 nupic compress photo.jpg -o photo.tiny.jpg -q 70    # explicit lossy
 nupic compress *.jpg -o /tmp/out/                   # batch into a directory
@@ -112,7 +113,7 @@ nupic compress --help
 
 | Subcommand | What it does | Today's backend |
 |---|---|---|
-| `compress` | PNG / JPEG / WebP (lossless **+ lossy**) / AVIF / GIF / BMP / TIFF. Defaults to **smallest visually-lossless file per format** (`Quality::Auto`); PNG default routes through `imagequant` palette quantization + `oxipng` so a typical photo-as-PNG drops to ~35% of the input (≈ TinyPNG); `Quality::Lossless` keeps the original PNG path (oxipng only); `Quality::{Format, Perceptual(Dssim)}` are the explicit knobs; multi-input batch + dir output | `imagequant` / `oxipng` / `image` / `webp` / `ravif` |
+| `compress` | PNG / JPEG / WebP (lossless **+ lossy**) / AVIF / GIF / BMP / TIFF. Defaults to **smallest perceptually-best file per format** (`Quality::Auto`); **PNG `Auto` since 0.5.0** routes through `nupic-quantize` (Stone C: OKLab perceptual-uniform argmin assignment over an `imagequant` median-cut palette, no Floyd-Steinberg dither) + `oxipng` — cross 7-fixture SSIMULACRA2 improves +77 points average vs 0.4.x while total bytes drop to 0.89× TinyPNG; `Quality::Lossless` keeps the bit-exact PNG path (oxipng only); `Quality::{Format, Perceptual(Dssim)}` are the explicit knobs and still use the 0.4.x imagequant path for compatibility; multi-input batch + dir output | `nupic-color` / `nupic-quantize` / `imagequant` / `oxipng` / `image` / `webp` / `ravif` |
 | `compare` | per-pixel metric between two images — DSSIM today, SSIMULACRA2 / Butteraugli reserved | `dssim` |
 | `bbox` | tightest rectangle around non-transparent pixels (alpha threshold tunable) | hand-rolled |
 | `bench` | sweep a dataset across formats; per-image + average size / encode-time / DSSIM table. `--baseline <json>` switches to a PNG-only mode that compares nupic against pinned external byte sizes (e.g. `assets/png-bench/baseline.json` for the TinyPNG reference) and exits non-zero if any input regresses past 1.15× the baseline | composes compress + compare |
@@ -198,15 +199,25 @@ Recurring milestones:
   `filter`, `denoise`, `bbox`, `bench` subcommands; batch compress;
   shell completions. SSIMULACRA2 / Butteraugli still reserved (need
   stone layer).
-- **0.4.x** — current. Lossy PNG path via `imagequant` palette
-  quantization + `oxipng`; PNG `Quality::Auto` now reaches TinyPNG-class
+- **0.4.x** — Lossy PNG path via `imagequant` palette
+  quantization + `oxipng`; PNG `Quality::Auto` reaches TinyPNG-class
   compression (≤ 1.15× on every fixture in `assets/png-bench/`; total
   ratio 0.92× vs TinyPNG). `nupic bench --baseline <json>` formalises
   the comparison and exits non-zero on regression.
-- **0.5.x +** *(planned)* — first stone crate: DEFLATE / PNG self-built
-  pipeline per `docs/roadmap.md` stages 0–7. `nupic bench` already
-  measures the cement baseline; stones get evaluated against the same
-  table as they land.
+- **0.5.x** — current. Three stone-layer crates land:
+  `nupic-color` (OKLab perceptual color space), `nupic-ssimulacra`
+  (self-built SSIMULACRA2 metric, bit-exact agreement with cement +
+  ~21% faster on M2 via nested rayon), `nupic-quantize` (perceptual
+  palette assignment + no-dither indexed PNG). PNG `Quality::Auto`
+  switches to `nupic-quantize`: 7-fixture SSIMULACRA2 average jumps
+  +77.3 points vs 0.4 (02-pluto -65 → +72 is the headline win) while
+  total bytes drop to 0.89× TinyPNG. The 0.4.x imagequant path is kept
+  reachable via `Quality::Format(q)` so callers wanting the explicit
+  quality knob still have it.
+- **0.6.x +** *(planned)* — DEFLATE self-built (`nupic-deflate` /
+  roadmap stages 1) + filter beam search (stage 7). Stone C polish:
+  rayon/SIMD on per-pixel argmin, adaptive light-dither for the
+  remaining ~1-2 SSIMULACRA2 gap on photographic fixtures.
 
 ## License
 

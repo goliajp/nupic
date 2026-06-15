@@ -151,10 +151,16 @@ fn encode_passthrough(
 
 fn encode_png(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     match opts.quality {
-        // Default = visually-lossless palette quantization via imagequant,
-        // then oxipng deflate / chunk optimization. Matches the lossy-PNG
-        // tooling (TinyPNG / pngquant) in spirit.
-        Quality::Auto => encode_png_lossy(img, opts, 70, 95),
+        // Default = Stone C (`nupic-quantize`): perceptual-OKLab argmin
+        // palette assignment over an imagequant median-cut palette,
+        // **no Floyd-Steinberg dither**, then oxipng. Beats the
+        // 0.4.x imagequant+dither path on SSIMULACRA2 across every
+        // fixture in `assets/png-bench/inputs/` while shrinking
+        // output ~4×. See `docs/research/png/03c-ter-graduation.md`.
+        Quality::Auto => encode_png_stone_c(img, opts),
+        // Quality::Format(q) — keep the cement imagequant path with the
+        // explicit quality knob, since callers reaching for `Format(q)`
+        // are asking for a specific dial, not a default.
         Quality::Format(q) => {
             let target = q.min(100);
             let min_q = target.saturating_sub(10);
@@ -168,6 +174,19 @@ fn encode_png(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
              encode_png should not see Quality::Perceptual"
         ),
     }
+}
+
+fn encode_png_stone_c(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
+    let rgba = img.inner().to_rgba8();
+    let (w, h) = (rgba.width(), rgba.height());
+    let raw = rgba.into_raw();
+    let qopts = nupic_quantize::QuantizeOpts {
+        n_colors: 256,
+        oxipng_preset: u8::min(opts.effort, 6),
+        strip_metadata: opts.strip_metadata,
+    };
+    nupic_quantize::quantize_indexed_png(&raw, w, h, qopts)
+        .map_err(|e| Error::Codec(Box::new(e)))
 }
 
 fn encode_png_lossless(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
