@@ -1074,6 +1074,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nupic-quantize"
+version = "0.4.0"
+dependencies = [
+ "image",
+ "imagequant",
+ "nupic-color",
+ "nupic-ssimulacra",
+ "oxipng",
+ "png",
+ "rgb",
+]
+
+[[package]]
 name = "nupic-research"
 version = "0.4.0"
 dependencies = [

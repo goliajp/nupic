@@ -1,0 +1,20 @@
+[package]
+name = "nupic-quantize"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Perceptual palette quantization for indexed PNG. Stone-layer; uses nupic-color OKLab argmin assignment over an imagequant median-cut palette, omitting Floyd-Steinberg dither. Beats cement imagequant on SSIMULACRA2 while shrinking output ~4× via deflate-friendly index streams."
+
+[dependencies]
+nupic-color = { path = "../nupic-color" }
+imagequant = { workspace = true }
+png = { workspace = true }
+oxipng = { workspace = true }
+rgb = { workspace = true }
+
+[dev-dependencies]
+nupic-ssimulacra = { path = "../nupic-ssimulacra" }
+image = { workspace = true, features = ["png"] }

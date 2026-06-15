@@ -4,6 +4,7 @@ members = [
     "crates/nupic-cli",
     "crates/nupic-color",
     "crates/nupic-core",
+    "crates/nupic-quantize",
     "crates/nupic-research",
     "crates/nupic-ssimulacra",
 ]
