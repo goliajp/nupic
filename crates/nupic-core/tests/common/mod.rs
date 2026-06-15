@@ -19,3 +19,15 @@ pub fn fixture(w: u32, h: u32) -> Image {
     opts.text = Some(String::new()); // skip label rendering for a clean fixture
     nupic_core::ops::mock::render(opts).expect("fixture render must succeed")
 }
+
+/// Build a complex-content fixture that exercises encoder compression paths
+/// (many distinct colours, gradient — so palette quantization has room to
+/// move). Stays deterministic and on the public API.
+pub fn complex_fixture(w: u32, h: u32) -> Image {
+    let mut opts = MockOpts::new(Size::new(w, h));
+    opts.style = MockStyle::Gradient;
+    opts.background = Color::rgb(20, 50, 200);
+    opts.foreground = Color::rgb(220, 180, 40);
+    opts.text = Some(String::new());
+    nupic_core::ops::mock::render(opts).expect("complex fixture render must succeed")
+}

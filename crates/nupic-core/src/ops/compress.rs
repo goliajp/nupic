@@ -150,32 +150,141 @@ fn encode_passthrough(
 }
 
 fn encode_png(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
-    // PNG is always lossless on the wire; `Auto` / `Format` / `Lossless`
-    // all map to "compress this PNG as well as you can", controlled by
-    // `effort`. `Quality::Perceptual` would require palette quantization
-    // driven by the metric — not implemented yet.
     match opts.quality {
-        Quality::Auto | Quality::Lossless | Quality::Format(_) => {}
-        Quality::Perceptual(_) => {
-            return Err(Error::NotImplemented(
-                "compress: perceptual quality target for PNG (palette quantization)",
-            ));
+        // Default = visually-lossless palette quantization via imagequant,
+        // then oxipng deflate / chunk optimization. Matches the lossy-PNG
+        // tooling (TinyPNG / pngquant) in spirit.
+        Quality::Auto => encode_png_lossy(img, opts, 70, 95),
+        Quality::Format(q) => {
+            let target = q.min(100);
+            let min_q = target.saturating_sub(10);
+            encode_png_lossy(img, opts, min_q, target)
         }
+        // True mathematical lossless — no quantization, oxipng only.
+        Quality::Lossless => encode_png_lossless(img, opts),
+        // Perceptual is routed through `perceptual_search` upstream.
+        Quality::Perceptual(_) => unreachable!(
+            "perceptual_search dispatches PNG quality search; \
+             encode_png should not see Quality::Perceptual"
+        ),
     }
+}
 
+fn encode_png_lossless(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     let mut raw = Vec::new();
     img.inner()
         .write_to(&mut Cursor::new(&mut raw), image::ImageFormat::Png)?;
+    oxipng_optimize(&raw, opts)
+}
 
+fn encode_png_lossy(
+    img: &Image,
+    opts: &CompressOpts,
+    quality_min: u8,
+    quality_target: u8,
+) -> Result<Vec<u8>> {
+    let rgba = img.inner().to_rgba8();
+    let width = rgba.width() as usize;
+    let height = rgba.height() as usize;
+
+    let pixels: &[rgb::RGBA8] = bytemuck_cast_rgba(rgba.as_raw());
+
+    let speed = effort_to_imagequant_speed(opts.effort);
+
+    // First try with the requested quality_min as the floor. If imagequant
+    // returns QualityTooLow (palette of 256 colours can't reach the floor),
+    // retry with quality_min=0 — we'd rather produce *some* quantised output
+    // than fail. This matches what TinyPNG / pngquant -Q 0-N would do.
+    let try_quantize = |min: u8| -> Result<(imagequant::Attributes, imagequant::Image<'static>, imagequant::QuantizationResult)> {
+        let mut attrs = imagequant::new();
+        attrs
+            .set_quality(min, quality_target)
+            .map_err(|e| Error::Codec(Box::new(e)))?;
+        attrs
+            .set_speed(i32::from(speed))
+            .map_err(|e| Error::Codec(Box::new(e)))?;
+        let mut img_iq = attrs
+            .new_image(pixels, width, height, 0.0)
+            .map_err(|e| Error::Codec(Box::new(e)))?;
+        let quant = attrs
+            .quantize(&mut img_iq)
+            .map_err(|e| Error::Codec(Box::new(e)))?;
+        Ok((attrs, img_iq, quant))
+    };
+
+    let (_attrs, mut img_iq, mut quant) = match try_quantize(quality_min) {
+        Ok(t) => t,
+        Err(Error::Codec(boxed)) => {
+            // Inspect the boxed error for QualityTooLow.
+            let is_quality_too_low = boxed
+                .downcast_ref::<imagequant::Error>()
+                .is_some_and(|e| matches!(e, imagequant::Error::QualityTooLow));
+            if is_quality_too_low && quality_min > 0 {
+                try_quantize(0)?
+            } else {
+                return Err(Error::Codec(boxed));
+            }
+        }
+        Err(e) => return Err(e),
+    };
+
+    quant
+        .set_dithering_level(1.0)
+        .map_err(|e| Error::Codec(Box::new(e)))?;
+
+    let (palette, indexed_pixels) = quant
+        .remapped(&mut img_iq)
+        .map_err(|e| Error::Codec(Box::new(e)))?;
+
+    // PNG palette is RGB-only; alpha goes in the tRNS chunk. Trim trailing
+    // 0xFF alphas so a fully-opaque palette skips tRNS entirely.
+    let mut rgb_palette: Vec<u8> = Vec::with_capacity(palette.len() * 3);
+    let mut alphas: Vec<u8> = Vec::with_capacity(palette.len());
+    for c in &palette {
+        rgb_palette.push(c.r);
+        rgb_palette.push(c.g);
+        rgb_palette.push(c.b);
+        alphas.push(c.a);
+    }
+    while alphas.last() == Some(&255) {
+        alphas.pop();
+    }
+
+    let mut raw: Vec<u8> = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut raw, width as u32, height as u32);
+        encoder.set_color(png::ColorType::Indexed);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_palette(rgb_palette);
+        if !alphas.is_empty() {
+            encoder.set_trns(alphas);
+        }
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| Error::Codec(Box::new(e)))?;
+        writer
+            .write_image_data(&indexed_pixels)
+            .map_err(|e| Error::Codec(Box::new(e)))?;
+    }
+
+    oxipng_optimize(&raw, opts)
+}
+
+fn oxipng_optimize(raw_png: &[u8], opts: &CompressOpts) -> Result<Vec<u8>> {
     let preset = u8::min(opts.effort, 6);
     let mut oxipng_opts = oxipng::Options::from_preset(preset);
     if opts.strip_metadata {
         oxipng_opts.strip = oxipng::StripChunks::Safe;
     }
+    oxipng::optimize_from_memory(raw_png, &oxipng_opts)
+        .map_err(|e| Error::Codec(Box::new(e)))
+}
 
-    let optimized = oxipng::optimize_from_memory(&raw, &oxipng_opts)
-        .map_err(|e| Error::Codec(Box::new(e)))?;
-    Ok(optimized)
+fn effort_to_imagequant_speed(effort: u8) -> u8 {
+    // nupic effort: 0 (fastest) ..= 10 (slowest).
+    // imagequant speed: 1 (slowest, best quality) ..= 10 (fastest).
+    let clamped = effort.min(10);
+    11u8.saturating_sub(clamped).max(1)
 }
 
 fn encode_jpeg(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
@@ -272,9 +381,10 @@ fn perceptual_search(img: &Image, opts: CompressOpts) -> Result<EncodedImage> {
         Quality::Perceptual(t) => t,
         _ => unreachable!("perceptual_search called with non-perceptual quality"),
     };
-    // Lossless formats sidestep search — they're already perfect.
+    // Formats with no quality knob fall back to lossless — there's nothing
+    // to search over. PNG gets palette quantization in the search loop below.
     match opts.format {
-        Format::Png | Format::Webp | Format::Gif | Format::Bmp | Format::Tiff => {
+        Format::Webp | Format::Gif | Format::Bmp | Format::Tiff => {
             let mut lossless_opts = opts.clone();
             lossless_opts.quality = Quality::Lossless;
             return encode(img, lossless_opts);
@@ -285,7 +395,7 @@ fn perceptual_search(img: &Image, opts: CompressOpts) -> Result<EncodedImage> {
                 opts.format
             )));
         }
-        Format::Jpeg | Format::Avif => {}
+        Format::Png | Format::Jpeg | Format::Avif => {}
     }
 
     let metric_fn: fn(&Image, &Image) -> Result<f64> = match target {
@@ -310,6 +420,10 @@ fn perceptual_search(img: &Image, opts: CompressOpts) -> Result<EncodedImage> {
         let trial_bytes = match trial.format {
             Format::Jpeg => encode_jpeg(img, &trial)?,
             Format::Avif => encode_avif(img, &trial)?,
+            Format::Png => {
+                let min_q = mid.saturating_sub(10);
+                encode_png_lossy(img, &trial, min_q, mid)?
+            }
             _ => unreachable!("checked above"),
         };
         let decoded = Image::decode(&trial_bytes)?;

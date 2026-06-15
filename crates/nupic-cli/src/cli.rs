@@ -69,9 +69,19 @@ pub struct BenchArgs {
     #[arg(long, default_value_t = 100)]
     pub limit: usize,
 
-    /// AVIF encoder speed knob shortcut (effort flag for compress). 0–10.
-    #[arg(long, default_value_t = 4)]
+    /// Encoder effort (compress's `--effort`). 0 (fastest) ..= 10 (slowest).
+    /// Default matches `nupic compress` so bench numbers reflect what users
+    /// actually get.
+    #[arg(long, default_value_t = 5)]
     pub effort: u8,
+
+    /// Compare each PNG output against a pinned external baseline (e.g.
+    /// `assets/png-bench/baseline.json` for the TinyPNG reference). When
+    /// supplied, the run forces `--formats=png` and prints `tinypng_bytes`
+    /// + `nupic/tinypng` columns. The process exits non-zero if any input
+    /// file exceeds `1.15x` the baseline byte size.
+    #[arg(long, value_name = "BASELINE_JSON")]
+    pub baseline: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

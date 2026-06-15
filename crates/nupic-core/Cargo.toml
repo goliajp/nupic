@@ -19,6 +19,8 @@ ab_glyph = { workspace = true }
 webp = { workspace = true }
 dssim = { workspace = true }
 imgref = { workspace = true }
+imagequant = { workspace = true }
+png = { workspace = true }
 clap = { workspace = true, optional = true }
 
 [features]

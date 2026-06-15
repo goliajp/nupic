@@ -36,7 +36,20 @@ pub fn run(args: Cli) -> Result<()> {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct BaselineFile {
+    fixtures: std::collections::BTreeMap<String, BaselineRow>,
+}
+
+#[derive(serde::Deserialize)]
+struct BaselineRow {
+    tinypng_bytes: u64,
+}
+
 fn run_bench(args: BenchArgs) -> Result<()> {
+    if args.baseline.is_some() {
+        return run_bench_vs_baseline(args);
+    }
     let formats = parse_formats(&args.formats)?;
 
     let mut inputs: Vec<PathBuf> = Vec::new();
@@ -152,6 +165,125 @@ fn run_bench(args: BenchArgs) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// PNG-only bench mode that compares `nupic compress` against a pinned
+/// external baseline (e.g. TinyPNG byte sizes captured into a JSON file).
+/// Exits non-zero if any input regresses past 1.15x the baseline.
+fn run_bench_vs_baseline(args: BenchArgs) -> Result<()> {
+    let baseline_path = args.baseline.as_ref().expect("checked by caller");
+    let baseline_text = fs::read_to_string(baseline_path)
+        .with_context(|| format!("could not read baseline {}", baseline_path.display()))?;
+    let baseline: BaselineFile = serde_json::from_str(&baseline_text)
+        .with_context(|| format!("baseline {} is not valid JSON", baseline_path.display()))?;
+
+    let mut inputs: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(&args.dataset)
+        .with_context(|| format!("could not read dataset directory {}", args.dataset.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() && matches!(Format::from_path(&path), Some(Format::Png)) {
+            inputs.push(path);
+        }
+    }
+    inputs.sort();
+    inputs.truncate(args.limit);
+    if inputs.is_empty() {
+        return Err(anyhow!(
+            "no PNG files found in {}",
+            args.dataset.display()
+        ));
+    }
+
+    println!(
+        "PNG bench vs baseline {} ({} input(s), effort={}). Pass = nupic <= 1.15x tinypng.",
+        baseline_path.display(),
+        inputs.len(),
+        args.effort,
+    );
+    println!();
+    println!(
+        "{:<32}  {:>10}  {:>10}  {:>10}  {:>8}  {:>4}",
+        "input", "input_b", "nupic_b", "tinypng_b", "ratio", "ok?"
+    );
+    println!(
+        "{:-<32}  {:->10}  {:->10}  {:->10}  {:->8}  {:->4}",
+        "", "", "", "", "", ""
+    );
+
+    let mut total_input = 0u64;
+    let mut total_nupic = 0u64;
+    let mut total_tinypng = 0u64;
+    let mut failures = 0usize;
+
+    for input in &inputs {
+        let name = input
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let trunc_name = truncate_left(&name, 32);
+        let input_bytes = fs::metadata(input)?.len();
+        let baseline_row = baseline.fixtures.get(&name);
+
+        let img = decode_input(input)?;
+        let opts = CompressOpts {
+            format: Format::Png,
+            quality: Quality::Auto,
+            strip_metadata: false,
+            effort: args.effort,
+        };
+        let encoded = img.compress(opts)?;
+        let nupic_bytes = encoded.bytes.len() as u64;
+
+        let (tinypng_bytes, ratio, ok) = match baseline_row {
+            Some(row) => {
+                let r = nupic_bytes as f64 / row.tinypng_bytes as f64;
+                let ok = r <= 1.15;
+                (row.tinypng_bytes, r, ok)
+            }
+            None => (0, f64::NAN, true), // unmapped inputs don't fail the run
+        };
+        if !ok {
+            failures += 1;
+        }
+        let ratio_display = if ratio.is_nan() {
+            "—".to_string()
+        } else {
+            format!("{ratio:.3}x")
+        };
+        let ok_display = if baseline_row.is_none() {
+            "—"
+        } else if ok {
+            "OK"
+        } else {
+            "FAIL"
+        };
+        println!(
+            "{trunc_name:<32}  {input_bytes:>10}  {nupic_bytes:>10}  {tinypng_bytes:>10}  {ratio_display:>8}  {ok_display:>4}"
+        );
+        total_input += input_bytes;
+        total_nupic += nupic_bytes;
+        total_tinypng += tinypng_bytes;
+    }
+
+    println!();
+    let overall_ratio = if total_tinypng > 0 {
+        total_nupic as f64 / total_tinypng as f64
+    } else {
+        f64::NAN
+    };
+    println!(
+        "TOTAL  input={total_input}  nupic={total_nupic}  tinypng={total_tinypng}  nupic/tinypng={overall_ratio:.3}x"
+    );
+    if failures > 0 {
+        Err(anyhow!(
+            "{failures} input(s) exceeded 1.15x the TinyPNG baseline"
+        ))
+    } else {
+        println!("all inputs within 1.15x of TinyPNG baseline.");
+        Ok(())
+    }
 }
 
 fn parse_formats(s: &str) -> Result<Vec<Format>> {

@@ -8,7 +8,7 @@
 
 mod common;
 
-use common::fixture;
+use common::{complex_fixture, fixture};
 use nupic_core::{
     CircleOpts, CompressOpts, FitMode, FitOpts, Format, Image, Quality, ResizeMode, ResizeOpts,
     Size,
@@ -428,7 +428,7 @@ fn dssim_via_compute_matches_direct_call() {
 // ====================================================================
 
 #[test]
-fn perceptual_dssim_on_png_returns_lossless() {
+fn perceptual_dssim_on_png_produces_valid_output() {
     let img = fixture(60, 40);
     let out = img
         .compress(CompressOpts {
@@ -439,8 +439,112 @@ fn perceptual_dssim_on_png_returns_lossless() {
         })
         .unwrap();
     assert_eq!(out.format, Format::Png);
-    // Lossless format with perceptual target should still produce valid PNG bytes.
     assert!(out.bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+}
+
+// ====================================================================
+// PNG lossy path (imagequant + oxipng) contracts — added in v0.4.0
+// ====================================================================
+
+#[test]
+fn png_auto_smaller_than_lossless_on_complex_image() {
+    let img = complex_fixture(200, 150);
+    let auto = img
+        .compress(CompressOpts {
+            format: Format::Png,
+            quality: Quality::Auto,
+            strip_metadata: false,
+            effort: 1,
+        })
+        .unwrap();
+    let lossless = img
+        .compress(CompressOpts {
+            format: Format::Png,
+            quality: Quality::Lossless,
+            strip_metadata: false,
+            effort: 1,
+        })
+        .unwrap();
+    assert!(
+        auto.bytes.len() < lossless.bytes.len(),
+        "Auto ({} bytes) should be smaller than Lossless ({} bytes) on a complex image",
+        auto.bytes.len(),
+        lossless.bytes.len()
+    );
+}
+
+#[test]
+fn png_lossless_is_visually_identical() {
+    // True mathematical losslessness round-tripped through the public API:
+    // decode the encoded bytes and ask the DSSIM metric — it must be 0.
+    let img = complex_fixture(80, 60);
+    let encoded = img
+        .compress(CompressOpts {
+            format: Format::Png,
+            quality: Quality::Lossless,
+            strip_metadata: false,
+            effort: 1,
+        })
+        .unwrap();
+    let decoded = Image::decode(&encoded.bytes).unwrap();
+    let score = nupic_core::metrics::dssim(&img, &decoded).unwrap();
+    assert!(
+        score < 1e-6,
+        "Lossless PNG must round-trip identical (DSSIM ~ 0), got {score}"
+    );
+}
+
+#[test]
+fn png_quality_low_smaller_than_quality_high() {
+    let img = complex_fixture(200, 150);
+    let q_low = img
+        .compress(CompressOpts {
+            format: Format::Png,
+            quality: Quality::Format(20),
+            strip_metadata: false,
+            effort: 1,
+        })
+        .unwrap();
+    let q_high = img
+        .compress(CompressOpts {
+            format: Format::Png,
+            quality: Quality::Format(95),
+            strip_metadata: false,
+            effort: 1,
+        })
+        .unwrap();
+    assert!(
+        q_low.bytes.len() <= q_high.bytes.len(),
+        "Format(20) ({} bytes) must be no larger than Format(95) ({} bytes)",
+        q_low.bytes.len(),
+        q_high.bytes.len()
+    );
+}
+
+#[test]
+fn png_perceptual_dssim_searches_quality_dimension() {
+    // With a strict DSSIM target, perceptual_search must produce a decodable
+    // PNG whose distortion vs the original is within the target. The size
+    // relative to lossless is not part of the contract — quantisation
+    // overhead can exceed a tiny lossless RGB on synthetic fixtures.
+    let img = complex_fixture(120, 90);
+    let perceptual = img
+        .compress(CompressOpts {
+            format: Format::Png,
+            quality: Quality::Perceptual(nupic_core::PerceptualTarget::Dssim(0.05)),
+            strip_metadata: false,
+            effort: 1,
+        })
+        .unwrap();
+    assert!(perceptual.bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+    let decoded = Image::decode(&perceptual.bytes).unwrap();
+    let score = nupic_core::metrics::dssim(&img, &decoded).unwrap();
+    // Allow 1.5x slack — the search is discrete and the lowest tried q may
+    // overshoot the target slightly.
+    assert!(
+        score <= 0.05 * 1.5,
+        "perceptual_search overshot DSSIM 0.05 target: got {score}"
+    );
 }
 
 #[test]

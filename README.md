@@ -62,10 +62,11 @@ nupic circle photo.jpg --feather 2 -o avatar.png
 # text watermark, bottom-right
 nupic watermark photo.jpg --text "© 2026" -p bottom-right -o photo-wm.jpg
 
-# format-aware compression — defaults to visually lossless per format
+# format-aware compression — defaults to "visually lossless, smallest file"
 nupic compress photo.jpg -o photo.opt.jpg           # JPEG at q=95
 nupic compress photo.png -o photo.opt.avif          # AVIF at q=90
-nupic compress screenshot.png -o screenshot.opt.png # PNG lossless (oxipng)
+nupic compress photo.png  -o photo.opt.png          # PNG: imagequant + oxipng (lossy palette quantization)
+nupic compress screenshot.png -q 100 -o ss.opt.png  # PNG: true lossless (oxipng only)
 nupic compress photo.jpg -o photo.tiny.jpg -q 70    # explicit lossy
 nupic compress *.jpg -o /tmp/out/                   # batch into a directory
 
@@ -111,10 +112,10 @@ nupic compress --help
 
 | Subcommand | What it does | Today's backend |
 |---|---|---|
-| `compress` | PNG / JPEG / WebP (lossless **+ lossy**) / AVIF / GIF / BMP / TIFF. Defaults to **visually lossless per format** (`Quality::Auto`); `Quality::{Format, Lossless, Perceptual(Dssim)}` are the explicit knobs; multi-input batch + dir output | `oxipng` / `image` / `webp` / `ravif` |
+| `compress` | PNG / JPEG / WebP (lossless **+ lossy**) / AVIF / GIF / BMP / TIFF. Defaults to **smallest visually-lossless file per format** (`Quality::Auto`); PNG default routes through `imagequant` palette quantization + `oxipng` so a typical photo-as-PNG drops to ~35% of the input (≈ TinyPNG); `Quality::Lossless` keeps the original PNG path (oxipng only); `Quality::{Format, Perceptual(Dssim)}` are the explicit knobs; multi-input batch + dir output | `imagequant` / `oxipng` / `image` / `webp` / `ravif` |
 | `compare` | per-pixel metric between two images — DSSIM today, SSIMULACRA2 / Butteraugli reserved | `dssim` |
 | `bbox` | tightest rectangle around non-transparent pixels (alpha threshold tunable) | hand-rolled |
-| `bench` | sweep a dataset across formats; per-image + average size / encode-time / DSSIM table — the cement-layer baseline self-built stones are measured against | composes compress + compare |
+| `bench` | sweep a dataset across formats; per-image + average size / encode-time / DSSIM table. `--baseline <json>` switches to a PNG-only mode that compares nupic against pinned external byte sizes (e.g. `assets/png-bench/baseline.json` for the TinyPNG reference) and exits non-zero if any input regresses past 1.15× the baseline | composes compress + compare |
 
 ### Shell
 
@@ -192,12 +193,17 @@ Recurring milestones:
 - **0.1.x** — scaffold + 6 day-1 ops + wrapped backends + dogfood binary.
 - **0.2.x** — GIF / BMP / TIFF encode, lossy WebP, `--font <path>`,
   visually-lossless `Quality::Auto` default.
-- **0.3.x** — current. `metrics::dssim` (cement) + working
+- **0.3.x** — `metrics::dssim` (cement) + working
   `Quality::Perceptual(Dssim)` binary-search; `compare`, `crop`,
   `filter`, `denoise`, `bbox`, `bench` subcommands; batch compress;
   shell completions. SSIMULACRA2 / Butteraugli still reserved (need
   stone layer).
-- **0.4.x +** *(planned)* — first stone crate: DEFLATE / PNG self-built
+- **0.4.x** — current. Lossy PNG path via `imagequant` palette
+  quantization + `oxipng`; PNG `Quality::Auto` now reaches TinyPNG-class
+  compression (≤ 1.15× on every fixture in `assets/png-bench/`; total
+  ratio 0.92× vs TinyPNG). `nupic bench --baseline <json>` formalises
+  the comparison and exits non-zero on regression.
+- **0.5.x +** *(planned)* — first stone crate: DEFLATE / PNG self-built
   pipeline per `docs/roadmap.md` stages 0–7. `nupic bench` already
   measures the cement baseline; stones get evaluated against the same
   table as they land.
