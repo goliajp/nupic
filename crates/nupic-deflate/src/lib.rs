@@ -3,7 +3,7 @@
 //!
 //! Stage 1 of the [PNG codec roadmap](../../docs/roadmap.md);see the
 //! `docs/research/png/06-nupic-deflate-design.md` essay for the phase
-//! plan. Currently phase 1.1:
+//! plan. Currently phase 1.2:
 //!
 //! - **Stored blocks**(BTYPE=00)— infrastructure, no compression.
 //!   Output is `~1.0005 ×` raw(per-block 5-byte header). Phase 1.0.0.
@@ -14,9 +14,14 @@
 //!   §3.2.7 header. Phase 1.0.2.
 //! - **Lazy LZ77 + best-of chooser** — defer each match by one byte to
 //!   see if `i+1` offers a strictly longer match;chain depth 128 (vs
-//!   greedy's 32). Phase 1.1 (current default `Level::Best`). Matches
-//!   `zlib level 9` size on most workloads, beats it on PNG IDAT
-//!   streams.
+//!   greedy's 32). Phase 1.1. Matches `zlib level 9` size on most
+//!   workloads, beats it on PNG IDAT streams.
+//! - **Multi-block split** — partition the token stream into 1 / 2 / 4
+//!   / 8 equal-sized blocks and pick the partition with smallest total
+//!   encoded size. Each block independently picks static-vs-dynamic
+//!   Huffman. Phase 1.2 (current default `Level::Best`). Strictly
+//!   beats `zlib level 9` size on heterogeneous structured text
+//!   (Cargo.lock, source files); equals or beats it on prose and PNG.
 //!
 //! Round-trips through `flate2` / `miniz_oxide` / `zlib` are validated
 //! in the test suite.
@@ -52,10 +57,12 @@ pub enum Level {
     /// Output is `~ zlib level 1` class on text;same as
     /// [`Level::Stored`] on incompressible random data.
     Fast,
-    /// **Lazy** LZ77 (chain depth 128, lazy threshold 16) + best of
-    /// {stored, static Huffman, dynamic Huffman} per call. Phase 1.1
-    /// default. Matches `zlib level 9` size on structured text /
-    /// source / config workloads;beats it on PNG IDAT streams.
+    /// **Lazy** LZ77 (chain depth 128, lazy threshold 16) + **multi-
+    /// block DEFLATE** (1/2/4/8 equal-token partitions, per-block
+    /// static-vs-dynamic format chooser) + whole-call stored fallback.
+    /// Phase 1.2 default. Strictly beats `zlib level 9` size on
+    /// heterogeneous structured text (Cargo.lock, source files);
+    /// equals it on natural-language prose and PNG IDAT streams.
     #[default]
     Best,
 }

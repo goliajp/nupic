@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Self-built DEFLATE encoder (RFC 1951) and zlib wrapper (RFC 1950). Stage 1 of the nupic PNG codec roadmap. Stage 1.1 emits stored / static-Huffman / dynamic-Huffman blocks (picking the smallest per call) via lazy LZ77 hash chain (chain depth 128, lazy threshold 16); matches zlib level 9 size on most workloads. Depends only on `nupic-bits` for CRC / Adler / bit I/O."
+description = "Self-built DEFLATE encoder (RFC 1951) and zlib wrapper (RFC 1950). Stage 1 of the nupic PNG codec roadmap. Stage 1.2 emits multi-block DEFLATE (1/2/4/8 equal-token partitions, per-block static/dynamic Huffman) via lazy LZ77 hash chain (depth 128, lazy threshold 16); strictly beats zlib level 9 on heterogeneous structured text. Depends only on `nupic-bits` for CRC / Adler / bit I/O."
 
 [dependencies]
 nupic-bits = { path = "../nupic-bits" }

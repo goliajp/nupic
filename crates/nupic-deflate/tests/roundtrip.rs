@@ -294,6 +294,40 @@ fn lazy_match_compresses_natural_text() {
 }
 
 #[test]
+fn multi_block_split_roundtrips_heterogeneous_input() {
+    // Synthetic heterogeneous payload: text block, repeats block, random
+    // block, text block again. With > 4096 tokens this should trigger
+    // partition into ≥ 2 blocks; each must roundtrip via flate2.
+    let mut data = Vec::new();
+    let phrase = b"the quick brown fox jumps over the lazy dog. ";
+    for _ in 0..400 {
+        data.extend_from_slice(phrase);
+    }
+    data.extend(std::iter::repeat(0xA5).take(20_000));
+    let mut s = 0xFEEDFACEu64;
+    for _ in 0..20_000 {
+        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        data.push((s >> 32) as u8);
+    }
+    for _ in 0..400 {
+        data.extend_from_slice(phrase);
+    }
+    let encoded = deflate_level(&data, Level::Best);
+    let mut decoder = DeflateDecoder::new(encoded.as_slice());
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded).expect("decode");
+    assert_eq!(decoded, data,
+        "multi-block heterogeneous roundtrip mismatch ({} bytes, encoded {})",
+        data.len(), encoded.len());
+    // The text-dominant tails are highly compressible while the middle
+    // 40 KB is incompressible — total should be much smaller than raw
+    // but dominated by the random middle.
+    assert!(encoded.len() < data.len(),
+        "compression should still net positive: encoded {} vs raw {}",
+        encoded.len(), data.len());
+}
+
+#[test]
 fn lazy_match_handles_large_random() {
     // Stress: 200 KB random — must roundtrip without panic, stored
     // fallback must still kick in (size ≤ raw + small fixed overhead

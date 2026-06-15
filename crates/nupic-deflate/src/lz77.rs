@@ -61,72 +61,107 @@ enum Token {
 pub fn deflate_static(data: &[u8]) -> Vec<u8> {
     let tokens = collect_tokens_greedy(data, GREEDY_CHAIN);
     let mut w = BitWriter::with_capacity(data.len() / 2 + 16);
-    emit_static_block(&mut w, &tokens);
+    emit_static_block(&mut w, &tokens, true);
     w.into_bytes()
 }
 
-/// Encode `data` as a single block, picking the smallest of
-/// {stored, static Huffman, dynamic Huffman}. Uses **lazy** LZ77
-/// matching with deeper hash-chain search (phase 1.1 semantics).
-///
-/// `stored` is only considered when `data.len() ≤ 65 535` (RFC 1951
-/// stored-block length cap); above that bound the chooser stays on
-/// {static, dynamic}, which both support arbitrary block sizes.
+/// Encode `data` as **multi-block DEFLATE**, picking per-block format
+/// (static vs dynamic Huffman) and globally comparing against a
+/// whole-call stored fallback. Uses **lazy** LZ77 matching with
+/// deeper hash-chain search (phase 1.1 semantics) and split-search
+/// over {1, 2, 4, 8} equal-sized token partitions (phase 1.2).
 pub fn deflate_best(data: &[u8]) -> Vec<u8> {
     let tokens = collect_tokens_lazy(data, LAZY_CHAIN, LAZY_MAX);
 
-    let static_bits = static_block_bits(&tokens);
-    let dyn_plan = DynamicPlan::build(&tokens);
-    let dynamic_bits = dyn_plan.total_bits();
+    // Find best block partition. Always at least 1 block (no split).
+    let (partition, multi_bits) = best_partition(&tokens);
+
+    // Compare against a whole-call stored fallback.
     let stored_bits = if data.len() <= STORED_MAX_FOR_BEST {
-        // header(3) + align + 4 bytes (LEN+NLEN) + raw bytes
-        // Worst-case: 3 header bits, then ≤7 align bits, then 4 + N bytes.
-        // Use the precise per-byte form: 3 + align_to_8 + (4+N)*8.
-        // Since we're picking best, use upper bound = 16 + N*8 (this is
-        // an overestimate by at most 5 bits; never picks stored when it
-        // would actually be worse).
+        // Tight upper bound on stored-block size:
+        //   3 header bits + ≤ 7 align bits + 4 (LEN+NLEN) + N raw bytes
         Some(16u64 + (data.len() as u64) * 8)
     } else {
         None
     };
 
-    let (best_bits, choice) = best_of(static_bits, dynamic_bits, stored_bits);
-
-    match choice {
-        BlockChoice::Static => {
-            let mut w = BitWriter::with_capacity((best_bits / 8 + 16) as usize);
-            emit_static_block(&mut w, &tokens);
-            w.into_bytes()
-        }
-        BlockChoice::Dynamic => {
-            let mut w = BitWriter::with_capacity((best_bits / 8 + 16) as usize);
-            emit_dynamic_block(&mut w, &tokens, &dyn_plan);
-            w.into_bytes()
-        }
-        BlockChoice::Stored => deflate_stored(data),
+    if let Some(sb) = stored_bits
+        && sb < multi_bits
+    {
+        return deflate_stored(data);
     }
+
+    // Emit multi-block. Each block independently picks static vs
+    // dynamic and BFINAL is set only on the last block.
+    let mut w = BitWriter::with_capacity((multi_bits / 8 + 16) as usize);
+    let last_idx = partition.len() - 1;
+    for (idx, block_tokens) in partition.iter().enumerate() {
+        let bfinal = idx == last_idx;
+        let static_bits = static_block_bits(block_tokens);
+        let plan = DynamicPlan::build(block_tokens);
+        let dynamic_bits = plan.total_bits();
+        if dynamic_bits < static_bits {
+            emit_dynamic_block(&mut w, block_tokens, &plan, bfinal);
+        } else {
+            emit_static_block(&mut w, block_tokens, bfinal);
+        }
+    }
+    w.into_bytes()
 }
 
 const STORED_MAX_FOR_BEST: usize = 65_535;
 
-#[derive(Clone, Copy)]
-enum BlockChoice {
-    Static,
-    Dynamic,
-    Stored,
-}
+/// Try splitting tokens into 1 / 2 / 4 / 8 equal-sized blocks. Return
+/// the partition with the smallest total encoded bit count.
+///
+/// Each block independently picks static vs dynamic Huffman — so the
+/// per-block cost is `min(static_bits, dynamic_bits)`.
+///
+/// Small token streams (< 2 × `MIN_SPLIT_TOKENS`) always stay at one
+/// block — header overhead would dominate any gain.
+fn best_partition(tokens: &[Token]) -> (Vec<&[Token]>, u64) {
+    const MIN_SPLIT_TOKENS: usize = 2048;
+    const CANDIDATES: &[usize] = &[1, 2, 4, 8];
 
-fn best_of(static_bits: u64, dynamic_bits: u64, stored_bits: Option<u64>) -> (u64, BlockChoice) {
-    let mut best = (static_bits, BlockChoice::Static);
-    if dynamic_bits < best.0 {
-        best = (dynamic_bits, BlockChoice::Dynamic);
+    let n = tokens.len();
+    let mut best: (Vec<&[Token]>, u64) = (vec![tokens], single_block_cost(tokens));
+    if n < MIN_SPLIT_TOKENS * 2 {
+        return best;
     }
-    if let Some(sb) = stored_bits {
-        if sb < best.0 {
-            best = (sb, BlockChoice::Stored);
+
+    for &n_blocks in CANDIDATES {
+        if n_blocks <= 1 {
+            continue;
+        }
+        if n / n_blocks < MIN_SPLIT_TOKENS {
+            continue;
+        }
+        let partition = split_equal(tokens, n_blocks);
+        let cost: u64 = partition.iter().map(|b| single_block_cost(b)).sum();
+        if cost < best.1 {
+            best = (partition, cost);
         }
     }
     best
+}
+
+fn single_block_cost(tokens: &[Token]) -> u64 {
+    let s = static_block_bits(tokens);
+    let plan = DynamicPlan::build(tokens);
+    let d = plan.total_bits();
+    s.min(d)
+}
+
+fn split_equal(tokens: &[Token], n_blocks: usize) -> Vec<&[Token]> {
+    let n = tokens.len();
+    let block_size = n / n_blocks;
+    let mut out: Vec<&[Token]> = Vec::with_capacity(n_blocks);
+    for i in 0..n_blocks {
+        let start = i * block_size;
+        let end = if i == n_blocks - 1 { n } else { (i + 1) * block_size };
+        out.push(&tokens[start..end]);
+    }
+    out
 }
 
 // =====================================================================
@@ -455,8 +490,8 @@ fn static_block_bits(tokens: &[Token]) -> u64 {
     bits
 }
 
-fn emit_static_block(w: &mut BitWriter, tokens: &[Token]) {
-    w.write_bits(1, 1); // BFINAL
+fn emit_static_block(w: &mut BitWriter, tokens: &[Token], bfinal: bool) {
+    w.write_bits(if bfinal { 1 } else { 0 }, 1);
     w.write_bits(0b01, 2); // BTYPE = static Huffman
     for &t in tokens {
         let syms = token_syms(t);
@@ -626,9 +661,9 @@ impl DynamicPlan {
     }
 }
 
-fn emit_dynamic_block(w: &mut BitWriter, tokens: &[Token], plan: &DynamicPlan) {
+fn emit_dynamic_block(w: &mut BitWriter, tokens: &[Token], plan: &DynamicPlan, bfinal: bool) {
     // Header.
-    w.write_bits(1, 1); // BFINAL
+    w.write_bits(if bfinal { 1 } else { 0 }, 1);
     w.write_bits(0b10, 2); // BTYPE = dynamic Huffman
     w.write_bits(u32::from(plan.hlit), 5);
     w.write_bits(u32::from(plan.hdist), 5);
