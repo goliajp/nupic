@@ -1,0 +1,16 @@
+[package]
+name = "nupic-deflate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Self-built DEFLATE encoder (RFC 1951) and zlib wrapper (RFC 1950). Stage 1 of the nupic PNG codec roadmap. Stage 1.0 emits stored + static-Huffman blocks via greedy LZ77; later phases add dynamic Huffman, lazy match, zopfli-class search. Depends only on `nupic-bits` for CRC / Adler / bit I/O."
+
+[dependencies]
+nupic-bits = { path = "../nupic-bits" }
+
+[dev-dependencies]
+# Cement oracles — verify our output round-trips through real decompressors.
+flate2 = "1"

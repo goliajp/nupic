@@ -5,6 +5,7 @@ members = [
     "crates/nupic-cli",
     "crates/nupic-color",
     "crates/nupic-core",
+    "crates/nupic-deflate",
     "crates/nupic-quantize",
     "crates/nupic-research",
     "crates/nupic-ssimulacra",
@@ -17,7 +18,7 @@ version = "1"
 version = "1"
 
 [workspace.package]
-version = "0.5.2"
+version = "0.5.3"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
