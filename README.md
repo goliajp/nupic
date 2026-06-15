@@ -136,9 +136,10 @@ new container formats, content-aware modes) slot in without SemVer breaks.
 - **steel** — `crates/nupic-core`: the stable public API surface (`Image`,
   `Filter`, `FitMode`, `Quality`, `EncodedImage`, op functions). Ceiling-first
   design — survives implementation swaps.
-- **stone** *(future)* — research-grade codec crates (`nupic-deflate`,
-  `nupic-png`, `nupic-color`, `nupic-quantize`, `nupic-ssimulacra`, …) per
-  `docs/roadmap.md`. **0 deps**, math/physics upper bound.
+- **stone** — research-grade codec crates (`nupic-bits`, `nupic-color`,
+  `nupic-deflate`, `nupic-quantize`, `nupic-ssimulacra`, `nupic-png`*) per
+  `docs/roadmap.md`. **0 deps**, math/physics upper bound. (* `nupic-png`
+  is the integration-stage stone, planned 0.6.x.)
 
 The `Image` type is an opaque newtype — internal representation can change
 without affecting callers. Every op function takes `Opts` and `Image`,
@@ -204,20 +205,27 @@ Recurring milestones:
   compression (≤ 1.15× on every fixture in `assets/png-bench/`; total
   ratio 0.92× vs TinyPNG). `nupic bench --baseline <json>` formalises
   the comparison and exits non-zero on regression.
-- **0.5.x** — current. Three stone-layer crates land:
+- **0.5.x** — current. Five stone-layer crates land:
   `nupic-color` (OKLab perceptual color space), `nupic-ssimulacra`
   (self-built SSIMULACRA2 metric, bit-exact agreement with cement +
   ~21% faster on M2 via nested rayon), `nupic-quantize` (perceptual
-  palette assignment + no-dither indexed PNG). PNG `Quality::Auto`
-  switches to `nupic-quantize`: 7-fixture SSIMULACRA2 average jumps
-  +77.3 points vs 0.4 (02-pluto -65 → +72 is the headline win) while
-  total bytes drop to 0.89× TinyPNG. The 0.4.x imagequant path is kept
-  reachable via `Quality::Format(q)` so callers wanting the explicit
-  quality knob still have it.
-- **0.6.x +** *(planned)* — DEFLATE self-built (`nupic-deflate` /
-  roadmap stages 1) + filter beam search (stage 7). Stone C polish:
-  rayon/SIMD on per-pixel argmin, adaptive light-dither for the
-  remaining ~1-2 SSIMULACRA2 gap on photographic fixtures.
+  palette assignment + no-dither indexed PNG), `nupic-bits` (CRC-32 +
+  Adler-32 + bit I/O, zero deps), `nupic-deflate` (self-built DEFLATE
+  encoder, phase 1.2: lazy LZ77 + dynamic Huffman + multi-block split,
+  strictly beats `zlib level 9` on heterogeneous text — cargo-lock
+  0.99× zl_9, 02-pluto IDAT 0.999× zl_9). PNG `Quality::Auto` still
+  routes through `nupic-quantize` → `oxipng` (`nupic-deflate`
+  integration into the PNG pipeline is the 0.6.x candidate); SSIMULACRA2
+  average jumps +77.3 points vs 0.4 (02-pluto -65 → +72 is the headline
+  win) while total bytes drop to 0.89× TinyPNG. The 0.4.x imagequant
+  path is kept reachable via `Quality::Format(q)` so callers wanting the
+  explicit quality knob still have it.
+- **0.6.x +** *(planned)* — `nupic-deflate` integration into the PNG
+  pipeline (replace `oxipng`'s zlib backend), stage 1 graduation
+  polish (libdeflate / zlib-ng / zopfli oracles, property fuzz,
+  silesia corpus), and filter beam search (roadmap stage 7). Stone C
+  polish: rayon/SIMD on per-pixel argmin, adaptive light-dither for
+  the remaining ~1-2 SSIMULACRA2 gap on photographic fixtures.
 
 ## License
 
