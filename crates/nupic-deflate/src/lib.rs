@@ -3,8 +3,8 @@
 //!
 //! Stage 1 of the [PNG codec roadmap](../../docs/roadmap.md);see the
 //! `docs/research/png/06-nupic-deflate-design.md` essay for the phase
-//! plan. Currently phase 1.3 (stage 1 graduation polish — bench
-//! against zopfli + property-fuzzed roundtrip):
+//! plan. Currently phase 1.4 (zopfli-class iterative refinement — full
+//! stage-1 graduation across the 7-input corpus):
 //!
 //! - **Stored blocks**(BTYPE=00)— infrastructure, no compression.
 //!   Output is `~1.0005 ×` raw(per-block 5-byte header). Phase 1.0.0.
@@ -28,6 +28,13 @@
 //!   graduation criterion). Phase 1.3 — see
 //!   `docs/research/png/06-seven-deflate-graduation.md`. Fixes a
 //!   stored-fallback bit-cost under-count caught by the new fuzz.
+//! - **Iterative cost-DP LZ77** — variable-position block split (phase
+//!   1.4a) + 5-pass forward-DP token search with Huffman code-length
+//!   cost feedback (phase 1.4b, zopfli core trick). Closes cargo-lock
+//!   from 1.14× zopfli → 1.01×;**all 7 corpus inputs ≤ 1.05× zopfli**
+//!   (full graduation). PNG IDAT corpus shrinks from 1.08× to **1.04×
+//!   oxipng**(libdeflate near-optimal). Phase 1.4 — see
+//!   `docs/research/png/06-nine-deflate-iterative.md`.
 //!
 //! Round-trips through `flate2` / `miniz_oxide` are validated by both
 //! scenario tests (canonical inputs at every level) and quickcheck

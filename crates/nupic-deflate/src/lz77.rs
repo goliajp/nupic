@@ -41,7 +41,33 @@ const LAZY_CHAIN: usize = 128;
 /// match is at least this long, commit immediately without trying the
 /// next position (matches zlib level 6 `max_lazy = 16`).
 const LAZY_MAX: usize = 16;
+/// Iterative-refinement chain depth — phase 1.4b. Deeper than lazy
+/// because each DP iteration costs O(N · chain) once, not per query,
+/// so search depth pays off without per-token blowup.
+const ITER_CHAIN: usize = 512;
+/// Phase 1.4b iteration count. 1 = lazy LZ77 only (no refinement);
+/// 2+ = additional cost-DP passes using the previous pass's Huffman
+/// code lengths as the per-token cost model. Zopfli default is 15;
+/// 5 captures most of the win at a fraction of the wall-clock.
+const ITER_PASSES: usize = 5;
+/// Inputs smaller than this skip iterative refinement (DP overhead
+/// not justified when single-block static beats dynamic anyway).
+const ITER_MIN_INPUT: usize = 1024;
 const NIL: u32 = u32::MAX;
+
+// RFC 1951 §3.2.6 static Huffman code lengths — used as the iteration-0
+// cost model in `collect_tokens_iterative` (matches the zopfli
+// initialisation convention).
+const STATIC_LIT_LENS: [u8; NUM_LIT_LEN] = {
+    let mut a = [0u8; NUM_LIT_LEN];
+    let mut i = 0;
+    while i < 144 { a[i] = 8; i += 1; }
+    while i < 256 { a[i] = 9; i += 1; }
+    while i < 280 { a[i] = 7; i += 1; }
+    while i < 286 { a[i] = 8; i += 1; }
+    a
+};
+const STATIC_DIST_LENS: [u8; NUM_DIST] = [5u8; NUM_DIST];
 
 const NUM_LIT_LEN: usize = 286;
 const NUM_DIST: usize = 30;
@@ -71,7 +97,7 @@ pub fn deflate_static(data: &[u8]) -> Vec<u8> {
 /// deeper hash-chain search (phase 1.1 semantics) and split-search
 /// over {1, 2, 4, 8} equal-sized token partitions (phase 1.2).
 pub fn deflate_best(data: &[u8]) -> Vec<u8> {
-    let tokens = collect_tokens_lazy(data, LAZY_CHAIN, LAZY_MAX);
+    let tokens = collect_tokens_iterative(data, ITER_PASSES);
 
     // Find best block partition. Always at least 1 block (no split).
     let (partition, multi_bits) = best_partition(&tokens);
@@ -115,20 +141,27 @@ pub fn deflate_best(data: &[u8]) -> Vec<u8> {
 
 const STORED_MAX_FOR_BEST: usize = 65_535;
 
-/// Try splitting tokens into 1 / 2 / 4 / 8 equal-sized blocks. Return
-/// the partition with the smallest total encoded bit count.
+/// Find the best block partition of `tokens`. Tries:
 ///
-/// Each block independently picks static vs dynamic Huffman — so the
-/// per-block cost is `min(static_bits, dynamic_bits)`.
+/// 1. Equal-sized splits with N ∈ {1, 2, 4, 8} (phase 1.2 baseline)
+/// 2. **Variable-position greedy bisection** (phase 1.4a) — recursively
+///    tries 7 evenly-spaced candidate split positions per block and
+///    accepts the split if the combined cost drops below the
+///    no-split baseline.
+///
+/// Returns the partition with the smallest total encoded bit count
+/// across both strategies. Each block independently picks static vs
+/// dynamic Huffman, so the per-block cost is
+/// `min(static_bits, dynamic_bits)`.
 ///
 /// Small token streams (< 2 × `MIN_SPLIT_TOKENS`) always stay at one
 /// block — header overhead would dominate any gain.
 fn best_partition(tokens: &[Token]) -> (Vec<&[Token]>, u64) {
-    const MIN_SPLIT_TOKENS: usize = 2048;
     const CANDIDATES: &[usize] = &[1, 2, 4, 8];
 
     let n = tokens.len();
-    let mut best: (Vec<&[Token]>, u64) = (vec![tokens], single_block_cost(tokens));
+    let single_cost = single_block_cost(tokens);
+    let mut best: (Vec<&[Token]>, u64) = (vec![tokens], single_cost);
     if n < MIN_SPLIT_TOKENS * 2 {
         return best;
     }
@@ -146,8 +179,64 @@ fn best_partition(tokens: &[Token]) -> (Vec<&[Token]>, u64) {
             best = (partition, cost);
         }
     }
+
+    // Phase 1.4a: variable-position greedy bisection.
+    let mut variable_partition: Vec<&[Token]> = Vec::new();
+    variable_split_recursive(tokens, 0, n, single_cost, &mut variable_partition);
+    if !variable_partition.is_empty() {
+        let cost: u64 = variable_partition.iter().map(|b| single_block_cost(b)).sum();
+        if cost < best.1 {
+            best = (variable_partition, cost);
+        }
+    }
+
     best
 }
+
+/// Greedy bisection: try 7 evenly-spaced split positions inside
+/// `tokens[start..end]`; if any split reduces the no-split cost,
+/// commit and recurse on each half. Blocks below `MIN_SPLIT_TOKENS`
+/// are not split further.
+fn variable_split_recursive<'a>(
+    tokens: &'a [Token],
+    start: usize,
+    end: usize,
+    baseline_cost: u64,
+    out: &mut Vec<&'a [Token]>,
+) {
+    const N_CANDIDATES: usize = 7;
+    let n = end - start;
+    if n < 2 * MIN_SPLIT_TOKENS {
+        out.push(&tokens[start..end]);
+        return;
+    }
+
+    let mut best_split: Option<(usize, u64, u64)> = None;
+    let mut best_total = baseline_cost;
+    for i in 1..=N_CANDIDATES {
+        let s = start + n * i / (N_CANDIDATES + 1);
+        if s - start < MIN_SPLIT_TOKENS || end - s < MIN_SPLIT_TOKENS {
+            continue;
+        }
+        let left = single_block_cost(&tokens[start..s]);
+        let right = single_block_cost(&tokens[s..end]);
+        let total = left + right;
+        if total < best_total {
+            best_total = total;
+            best_split = Some((s, left, right));
+        }
+    }
+
+    match best_split {
+        Some((s, left, right)) => {
+            variable_split_recursive(tokens, start, s, left, out);
+            variable_split_recursive(tokens, s, end, right, out);
+        }
+        None => out.push(&tokens[start..end]),
+    }
+}
+
+const MIN_SPLIT_TOKENS: usize = 2048;
 
 fn single_block_cost(tokens: &[Token]) -> u64 {
     let s = static_block_bits(tokens);
@@ -408,6 +497,210 @@ fn find_longest_match(
         chain_pos = next;
     }
     (best_len, best_dist)
+}
+
+// =====================================================================
+// Phase 1.4b — iterative LZ77 with Huffman-cost feedback
+// =====================================================================
+//
+// Zopfli's core trick: re-run LZ77 multiple times, each pass using the
+// previous pass's per-symbol Huffman code lengths as a per-token cost
+// model. The match selection then minimises *output bit cost*, not
+// match length. After a few iterations the cost model stabilises and
+// the tokens converge to (near-)optimal.
+//
+// We implement a dynamic-programming forward search: `cost[i]` =
+// minimum bits to encode `data[0..i]`, with transitions `i → i+1`
+// (literal) and `i → i+len` (match of (len, dist)). Reconstruction
+// walks the `best[]` parent array backward.
+//
+// Pass 0 uses RFC 1951 static Huffman lengths as the cost model
+// (same convention as zopfli's first iteration). Passes 1..N build
+// the cost model from the previous pass's token frequencies.
+
+/// Compute the bit cost of emitting a (length, distance) match under
+/// the provided Huffman code-length tables.
+#[inline]
+fn cost_of_match(length: u16, distance: u16, lit_lens: &[u8], dist_lens: &[u8]) -> u32 {
+    let (len_sym, len_extra_bits, _) = LENGTH_SYM[length as usize - 3];
+    let (dist_sym, _, dist_extra_bits) = if distance <= 256 {
+        let (s, b, e) = DIST_SYM_SMALL[distance as usize - 1];
+        (s, b as u32, e)
+    } else {
+        let (s, b, e) = dist_sym_large(u32::from(distance));
+        (s, b, e)
+    };
+    u32::from(lit_lens[len_sym as usize])
+        + u32::from(len_extra_bits)
+        + u32::from(dist_lens[dist_sym as usize])
+        + u32::from(dist_extra_bits)
+}
+
+/// Forward DP: pick the lowest-cost token sequence covering `data`
+/// under the provided cost model.
+fn dp_optimal_tokens(data: &[u8], max_chain: usize, lit_lens: &[u8], dist_lens: &[u8]) -> Vec<Token> {
+    let n = data.len();
+    if n == 0 {
+        return Vec::new();
+    }
+
+    // cost[i] = min bits to encode data[0..i].
+    let mut cost = vec![u32::MAX; n + 1];
+    cost[0] = 0;
+    // best[i] = (length-covering-to-i, distance). length=0 + distance=0
+    // means "no incoming edge" (only valid for i=0).
+    let mut best = vec![(0u16, 0u16); n + 1];
+
+    let mut hash_head = vec![NIL; HASH_SIZE];
+    let mut hash_prev = vec![NIL; WIN_SIZE];
+
+    for i in 0..n {
+        if cost[i] == u32::MAX {
+            continue; // unreachable position (shouldn't happen w/ literals)
+        }
+        // Literal move.
+        let lit_cost = cost[i].saturating_add(u32::from(lit_lens[data[i] as usize]));
+        if lit_cost < cost[i + 1] {
+            cost[i + 1] = lit_cost;
+            best[i + 1] = (1, 0); // length=1 + distance=0 ⇒ literal
+        }
+
+        // Match moves: walk hash chain at position i; for each chain
+        // entry compute max-extend length and consider all length sym
+        // boundaries up to that extend.
+        if i + MIN_MATCH <= n {
+            let h = hash3(&data[i..]);
+            let head = hash_head[h];
+            let min_pos = i.saturating_sub(WIN_SIZE);
+            let max_extend = (n - i).min(MAX_MATCH);
+            let mut chain_pos = head;
+            let mut depth = 0;
+            while chain_pos != NIL && (chain_pos as usize) >= min_pos && depth < max_chain {
+                depth += 1;
+                let cp = chain_pos as usize;
+                if data[cp] == data[i]
+                    && data[cp + 1] == data[i + 1]
+                    && data[cp + 2] == data[i + 2]
+                {
+                    let mut k = 3usize;
+                    while k < max_extend && data[cp + k] == data[i + k] {
+                        k += 1;
+                    }
+                    let dist = i - cp;
+                    // Consider just the max-extend length per chain entry.
+                    // (Length-symbol boundary variants would shave another
+                    // ~ 0.5% but multiply DP work — defer to phase 1.5.)
+                    let match_cost = cost[i].saturating_add(cost_of_match(
+                        k as u16,
+                        dist as u16,
+                        lit_lens,
+                        dist_lens,
+                    ));
+                    let target = i + k;
+                    if match_cost < cost[target] {
+                        cost[target] = match_cost;
+                        best[target] = (k as u16, dist as u16);
+                    }
+                }
+                let next = hash_prev[(chain_pos as usize) % WIN_SIZE];
+                if next == NIL || next >= chain_pos {
+                    break;
+                }
+                chain_pos = next;
+            }
+            insert_hash(&mut hash_head, &mut hash_prev, data, i);
+        }
+    }
+
+    // Reconstruct tokens by walking back from n.
+    let mut rev: Vec<Token> = Vec::new();
+    let mut pos = n;
+    while pos > 0 {
+        let (len, dist) = best[pos];
+        if dist == 0 {
+            rev.push(Token::Literal(data[pos - 1]));
+            pos -= 1;
+        } else {
+            rev.push(Token::Match { length: len, distance: dist });
+            pos -= len as usize;
+        }
+    }
+    rev.reverse();
+    rev
+}
+
+/// Build per-symbol Huffman code lengths from a token sequence (the
+/// same `lit_freq` / `dist_freq` accumulation that `DynamicPlan::build`
+/// does, but returning bare length arrays for the cost model).
+fn cost_lens_from_tokens(tokens: &[Token]) -> ([u8; NUM_LIT_LEN], [u8; NUM_DIST]) {
+    let mut lit_freq = [0u32; NUM_LIT_LEN];
+    let mut dist_freq = [0u32; NUM_DIST];
+    for &t in tokens {
+        let syms = token_syms(t);
+        lit_freq[syms.lit_sym as usize] += 1;
+        if let Some(d) = syms.dist {
+            dist_freq[d.sym as usize] += 1;
+        }
+    }
+    lit_freq[256] += 1; // EOB always present
+    let lit_vec = limited_lengths(&lit_freq, MAX_LIT_LEN_BITS);
+    let dist_vec = limited_lengths(&dist_freq, MAX_DIST_BITS);
+    let mut lit_lens = [0u8; NUM_LIT_LEN];
+    let mut dist_lens = [0u8; NUM_DIST];
+    for i in 0..NUM_LIT_LEN {
+        // Symbols with length 0 (unused) get a fake length large enough
+        // to discourage the cost model from "discovering" them. Use
+        // MAX_LIT_LEN_BITS (the natural maximum) so the cost-DP doesn't
+        // overflow but treats unused symbols as expensive.
+        lit_lens[i] = if lit_vec[i] == 0 { MAX_LIT_LEN_BITS } else { lit_vec[i] };
+    }
+    for i in 0..NUM_DIST {
+        dist_lens[i] = if dist_vec[i] == 0 { MAX_DIST_BITS } else { dist_vec[i] };
+    }
+    (lit_lens, dist_lens)
+}
+
+/// Multi-pass cost-aware tokenisation. Initial pass uses RFC 1951
+/// static Huffman as the cost model; subsequent passes use the
+/// previous pass's token-frequency-fitted Huffman.
+fn collect_tokens_iterative(data: &[u8], n_passes: usize) -> Vec<Token> {
+    if data.len() < ITER_MIN_INPUT {
+        // Below this size, single-pass lazy already matches DP since
+        // there's little room for cost-based improvement.
+        return collect_tokens_lazy(data, LAZY_CHAIN, LAZY_MAX);
+    }
+
+    // Pass 0: DP with static Huffman as cost model.
+    let mut tokens = dp_optimal_tokens(data, ITER_CHAIN, &STATIC_LIT_LENS, &STATIC_DIST_LENS);
+
+    // Passes 1..n_passes: refine cost model from previous tokens.
+    for _ in 1..n_passes {
+        let (lit_lens, dist_lens) = cost_lens_from_tokens(&tokens);
+        let next = dp_optimal_tokens(data, ITER_CHAIN, &lit_lens, &dist_lens);
+        // Cheap convergence check: if token count is identical and DP
+        // cost matches, we're done. Otherwise replace.
+        if next.len() == tokens.len() && tokens_equal(&tokens, &next) {
+            tokens = next;
+            break;
+        }
+        tokens = next;
+    }
+    tokens
+}
+
+#[inline]
+fn tokens_equal(a: &[Token], b: &[Token]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b.iter()).all(|(x, y)| match (x, y) {
+        (Token::Literal(p), Token::Literal(q)) => p == q,
+        (
+            Token::Match { length: l1, distance: d1 },
+            Token::Match { length: l2, distance: d2 },
+        ) => l1 == l2 && d1 == d2,
+        _ => false,
+    })
 }
 
 // =====================================================================
