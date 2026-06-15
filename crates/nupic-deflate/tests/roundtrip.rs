@@ -262,6 +262,65 @@ fn best_default_level_is_best() {
 }
 
 #[test]
+fn lazy_match_compresses_natural_text() {
+    // Cross-phrase repetition — lazy match finds long-range matches
+    // greedy would miss (greedy commits on first 3-byte match).
+    let phrases: Vec<&[u8]> = vec![
+        b"The quick brown fox jumps over the lazy dog. ",
+        b"Pack my box with five dozen liquor jugs. ",
+        b"How vexingly quick daft zebras jump! ",
+        b"The five boxing wizards jump quickly. ",
+        b"Sphinx of black quartz, judge my vow. ",
+    ];
+    let mut data = Vec::new();
+    for round in 0..30 {
+        for p in &phrases {
+            data.extend_from_slice(p);
+        }
+        data.extend_from_slice(phrases[round % phrases.len()]);
+    }
+    let encoded = deflate_level(&data, Level::Best);
+    let mut decoder = DeflateDecoder::new(encoded.as_slice());
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded).expect("decode");
+    assert_eq!(decoded, data, "lazy-mode roundtrip mismatch");
+    let ratio = encoded.len() as f64 / data.len() as f64;
+    assert!(
+        ratio < 0.05,
+        "lazy on cross-phrase repetition should compress < 5% (got {ratio:.4}, {} from {})",
+        encoded.len(),
+        data.len()
+    );
+}
+
+#[test]
+fn lazy_match_handles_large_random() {
+    // Stress: 200 KB random — must roundtrip without panic, stored
+    // fallback must still kick in (size ≤ raw + small fixed overhead
+    // for multi-block stored output, which is what `Level::Stored`
+    // produces for inputs > 65 KiB).
+    let mut s = 0xFEED_FACEu64;
+    let mut data = Vec::with_capacity(200_000);
+    for _ in 0..200_000 {
+        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        data.push((s >> 32) as u8);
+    }
+    let encoded = deflate_level(&data, Level::Best);
+    let mut decoder = DeflateDecoder::new(encoded.as_slice());
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded).expect("decode");
+    assert_eq!(decoded, data);
+    // Single static/dynamic block on incompressible 200 KB random adds
+    // < 6% overhead (Huffman padding for 8-bit literals).
+    assert!(
+        encoded.len() < data.len() + data.len() / 16,
+        "lazy on 200 KB random ballooned to {} from {}",
+        encoded.len(),
+        data.len()
+    );
+}
+
+#[test]
 fn best_block_size_chooser_never_regresses() {
     // For every type of input we already exercise above, Best must be
     // ≤ Fast in encoded size. (Fast = static Huffman; chooser includes

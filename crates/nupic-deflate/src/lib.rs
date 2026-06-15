@@ -3,17 +3,20 @@
 //!
 //! Stage 1 of the [PNG codec roadmap](../../docs/roadmap.md);see the
 //! `docs/research/png/06-nupic-deflate-design.md` essay for the phase
-//! plan. Currently phase 1.0.2:
+//! plan. Currently phase 1.1:
 //!
 //! - **Stored blocks**(BTYPE=00)— infrastructure, no compression.
 //!   Output is `~1.0005 ×` raw(per-block 5-byte header). Phase 1.0.0.
 //! - **Greedy LZ77 + static Huffman**(BTYPE=01)— `zlib level 1`
-//!   class on text / repeats. Phase 1.0.1.
+//!   class on text / repeats. Phase 1.0.1. Retained as [`Level::Fast`].
 //! - **Dynamic Huffman per block**(BTYPE=10)— frequency-tuned
 //!   canonical Huffman tree (length-limited 15) per block, RFC 1951
-//!   §3.2.7 header. Closes the gap to `zlib level 6/9` on text.
-//!   Phase 1.0.2 (current default — encoder picks the smallest of
-//!   stored / static / dynamic per call).
+//!   §3.2.7 header. Phase 1.0.2.
+//! - **Lazy LZ77 + best-of chooser** — defer each match by one byte to
+//!   see if `i+1` offers a strictly longer match;chain depth 128 (vs
+//!   greedy's 32). Phase 1.1 (current default `Level::Best`). Matches
+//!   `zlib level 9` size on most workloads, beats it on PNG IDAT
+//!   streams.
 //!
 //! Round-trips through `flate2` / `miniz_oxide` / `zlib` are validated
 //! in the test suite.
@@ -49,10 +52,10 @@ pub enum Level {
     /// Output is `~ zlib level 1` class on text;same as
     /// [`Level::Stored`] on incompressible random data.
     Fast,
-    /// Greedy LZ77 + **best of {stored, static Huffman, dynamic
-    /// Huffman}** per call. Phase 1.0.2 default. Closes the gap to
-    /// `zlib level 6/9` on compressible inputs without ever doing worse
-    /// than [`Level::Fast`] or [`Level::Stored`].
+    /// **Lazy** LZ77 (chain depth 128, lazy threshold 16) + best of
+    /// {stored, static Huffman, dynamic Huffman} per call. Phase 1.1
+    /// default. Matches `zlib level 9` size on structured text /
+    /// source / config workloads;beats it on PNG IDAT streams.
     #[default]
     Best,
 }

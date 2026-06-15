@@ -51,6 +51,13 @@ sunt in culpa qui officia deserunt mollit anim id est laborum.";
         for _ in 0..20 { buf.extend_from_slice(lorem); }
         buf
     }));
+    // Real-world structured text — distinguishes greedy from lazy match.
+    if let Ok(b) = fs::read(root.join("Cargo.lock")) {
+        inputs.push(("cargo-lock", b));
+    }
+    if let Ok(b) = fs::read(root.join("docs/research/png/03-perceptual-stone.md")) {
+        inputs.push(("essay-03-natural-text", b));
+    }
 
     println!(
         "{:<22} {:>10}  {:>10} {:>10}  {:>10} {:>10} {:>10}   {:>8} {:>8} {:>8} {:>8}",

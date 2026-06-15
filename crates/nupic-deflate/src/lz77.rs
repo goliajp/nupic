@@ -31,7 +31,16 @@ const HASH_SIZE: usize = 1 << HASH_BITS;
 const HASH_MASK: u32 = (HASH_SIZE - 1) as u32;
 const MIN_MATCH: usize = 3;
 const MAX_MATCH: usize = 258;
-const MAX_CHAIN: usize = 32;
+/// Greedy-mode chain depth — phase 1.0.1 `Level::Fast` parameter
+/// (matches zlib level 1).
+const GREEDY_CHAIN: usize = 32;
+/// Lazy-mode chain depth — phase 1.1 `Level::Best` parameter
+/// (matches zlib level 6).
+const LAZY_CHAIN: usize = 128;
+/// Lazy-mode "good enough" threshold — phase 1.1. If the current
+/// match is at least this long, commit immediately without trying the
+/// next position (matches zlib level 6 `max_lazy = 16`).
+const LAZY_MAX: usize = 16;
 const NIL: u32 = u32::MAX;
 
 const NUM_LIT_LEN: usize = 286;
@@ -47,22 +56,24 @@ enum Token {
     Match { length: u16, distance: u16 },
 }
 
-/// Encode `data` as a single static-Huffman DEFLATE block.
+/// Encode `data` as a single static-Huffman DEFLATE block. Uses
+/// greedy LZ77 (phase 1.0.1 semantics).
 pub fn deflate_static(data: &[u8]) -> Vec<u8> {
-    let tokens = collect_tokens(data);
+    let tokens = collect_tokens_greedy(data, GREEDY_CHAIN);
     let mut w = BitWriter::with_capacity(data.len() / 2 + 16);
     emit_static_block(&mut w, &tokens);
     w.into_bytes()
 }
 
 /// Encode `data` as a single block, picking the smallest of
-/// {stored, static Huffman, dynamic Huffman}.
+/// {stored, static Huffman, dynamic Huffman}. Uses **lazy** LZ77
+/// matching with deeper hash-chain search (phase 1.1 semantics).
 ///
 /// `stored` is only considered when `data.len() ≤ 65 535` (RFC 1951
 /// stored-block length cap); above that bound the chooser stays on
 /// {static, dynamic}, which both support arbitrary block sizes.
 pub fn deflate_best(data: &[u8]) -> Vec<u8> {
-    let tokens = collect_tokens(data);
+    let tokens = collect_tokens_lazy(data, LAZY_CHAIN, LAZY_MAX);
 
     let static_bits = static_block_bits(&tokens);
     let dyn_plan = DynamicPlan::build(&tokens);
@@ -119,10 +130,17 @@ fn best_of(static_bits: u64, dynamic_bits: u64, stored_bits: Option<u64>) -> (u6
 }
 
 // =====================================================================
-// Token collection (greedy LZ77 hash chain — unchanged from phase 1.0.1)
+// Token collection
 // =====================================================================
+//
+// Two flavours live here:
+// * `collect_tokens_greedy` (phase 1.0.1) — take every match as found.
+// * `collect_tokens_lazy`   (phase 1.1)   — defer each match by one
+//   byte to see whether `i+1` has a strictly longer match. If yes,
+//   sacrifice `data[i-1]` as a literal; the longer match at `i` wins.
+//   Otherwise commit the deferred match.
 
-fn collect_tokens(data: &[u8]) -> Vec<Token> {
+fn collect_tokens_greedy(data: &[u8], max_chain: usize) -> Vec<Token> {
     let n = data.len();
     let mut tokens: Vec<Token> = Vec::with_capacity(n / 2 + 1);
     if n < MIN_MATCH {
@@ -138,7 +156,7 @@ fn collect_tokens(data: &[u8]) -> Vec<Token> {
         let (best_len, best_dist) = if i + MIN_MATCH <= n {
             let h = hash3(&data[i..]);
             let head = hash_head[h];
-            find_longest_match(data, i, head, &hash_prev)
+            find_longest_match(data, i, head, &hash_prev, max_chain)
         } else {
             (0, 0)
         };
@@ -162,6 +180,125 @@ fn collect_tokens(data: &[u8]) -> Vec<Token> {
             i += 1;
         }
     }
+    tokens
+}
+
+fn collect_tokens_lazy(data: &[u8], max_chain: usize, lazy_threshold: usize) -> Vec<Token> {
+    let n = data.len();
+    let mut tokens: Vec<Token> = Vec::with_capacity(n / 2 + 1);
+    if n < MIN_MATCH {
+        for &b in data {
+            tokens.push(Token::Literal(b));
+        }
+        return tokens;
+    }
+    let mut hash_head = vec![NIL; HASH_SIZE];
+    let mut hash_prev = vec![NIL; WIN_SIZE];
+
+    // Invariant: before evaluating position `i`, every position in
+    // `0..i` has had its hash inserted (when it had MIN_MATCH lookahead).
+    //
+    // `prev_len` carries the match found at `i-1` that we are deferring;
+    // 0 means no deferred match.
+    let mut prev_len = 0usize;
+    let mut prev_dist = 0usize;
+    let mut i = 0usize;
+
+    while i < n {
+        // Find longest match at `i`.
+        let (cur_len, cur_dist) = if i + MIN_MATCH <= n {
+            let h = hash3(&data[i..]);
+            let head = hash_head[h];
+            find_longest_match(data, i, head, &hash_prev, max_chain)
+        } else {
+            (0, 0)
+        };
+
+        // Insert hash for `i` so future searches see it.
+        if i + MIN_MATCH <= n {
+            insert_hash(&mut hash_head, &mut hash_prev, data, i);
+        }
+
+        if prev_len >= MIN_MATCH && cur_len <= prev_len {
+            // Commit the deferred match at i-1.
+            tokens.push(Token::Match {
+                length: prev_len as u16,
+                distance: prev_dist as u16,
+            });
+            // Match covers positions i-1 .. i-1+prev_len-1. Hashes already
+            // inserted at i-1 (when found) and i (just now). Need to add
+            // hashes for i+1 .. i+prev_len-2.
+            let end = i - 1 + prev_len;
+            let mut k = i + 1;
+            while k < end {
+                if k + MIN_MATCH <= n {
+                    insert_hash(&mut hash_head, &mut hash_prev, data, k);
+                }
+                k += 1;
+            }
+            i = end;
+            prev_len = 0;
+        } else if prev_len >= MIN_MATCH {
+            // `cur_len > prev_len`: lazy paid off, sacrifice data[i-1] as
+            // literal and defer (or commit) the better match at `i`.
+            tokens.push(Token::Literal(data[i - 1]));
+            if cur_len >= lazy_threshold {
+                // commit immediately — no further deferral
+                tokens.push(Token::Match {
+                    length: cur_len as u16,
+                    distance: cur_dist as u16,
+                });
+                let end = i + cur_len;
+                let mut k = i + 1;
+                while k < end {
+                    if k + MIN_MATCH <= n {
+                        insert_hash(&mut hash_head, &mut hash_prev, data, k);
+                    }
+                    k += 1;
+                }
+                i = end;
+                prev_len = 0;
+            } else {
+                prev_len = cur_len;
+                prev_dist = cur_dist;
+                i += 1;
+            }
+        } else {
+            // No deferred match. Decide on `cur`.
+            if cur_len >= lazy_threshold {
+                // commit immediately
+                tokens.push(Token::Match {
+                    length: cur_len as u16,
+                    distance: cur_dist as u16,
+                });
+                let end = i + cur_len;
+                let mut k = i + 1;
+                while k < end {
+                    if k + MIN_MATCH <= n {
+                        insert_hash(&mut hash_head, &mut hash_prev, data, k);
+                    }
+                    k += 1;
+                }
+                i = end;
+            } else if cur_len >= MIN_MATCH {
+                prev_len = cur_len;
+                prev_dist = cur_dist;
+                i += 1;
+            } else {
+                tokens.push(Token::Literal(data[i]));
+                i += 1;
+            }
+        }
+    }
+
+    // Flush trailing deferred match (no lookahead left to compare against).
+    if prev_len >= MIN_MATCH {
+        tokens.push(Token::Match {
+            length: prev_len as u16,
+            distance: prev_dist as u16,
+        });
+    }
+
     tokens
 }
 
@@ -193,6 +330,7 @@ fn find_longest_match(
     pos: usize,
     head: u32,
     hash_prev: &[u32],
+    max_chain: usize,
 ) -> (usize, usize) {
     let mut chain_pos = head;
     let mut best_len = 0usize;
@@ -205,7 +343,7 @@ fn find_longest_match(
 
     let min_pos = pos.saturating_sub(WIN_SIZE);
     let mut depth = 0;
-    while chain_pos != NIL && (chain_pos as usize) >= min_pos && depth < MAX_CHAIN {
+    while chain_pos != NIL && (chain_pos as usize) >= min_pos && depth < max_chain {
         depth += 1;
         let cp = chain_pos as usize;
         if data[cp] == data[pos]
