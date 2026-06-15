@@ -7,7 +7,7 @@
 use std::io::Read;
 
 use flate2::read::{DeflateDecoder, ZlibDecoder};
-use nupic_deflate::{deflate, zlib_compress};
+use nupic_deflate::{Level, deflate, deflate_level, deflate_stored, zlib_compress};
 
 fn deflate_roundtrip(input: &[u8]) {
     let encoded = deflate(input);
@@ -126,11 +126,67 @@ fn zlib_ends_with_adler32() {
 #[test]
 fn stored_block_overhead_is_small() {
     let data = vec![0x42u8; 10_000];
-    let encoded = deflate(&data);
+    let encoded = deflate_stored(&data);
     let overhead = encoded.len() as i64 - data.len() as i64;
     // 1 stored block of 10 000 bytes: 5 byte block header + 10 000 raw.
     assert!(
         overhead >= 5 && overhead <= 10,
         "expected 5-10 byte overhead for one stored block, got {}", overhead
     );
+}
+
+#[test]
+fn fast_path_compresses_repeats_heavily() {
+    // 10 000 identical bytes compress to a few dozen bytes via LZ77 +
+    // static Huffman: one literal + a chain of length-258 matches.
+    let data = vec![0x42u8; 10_000];
+    let encoded = deflate_level(&data, Level::Fast);
+    assert!(
+        encoded.len() < 80,
+        "expected huge compression on repeats, got {} bytes",
+        encoded.len()
+    );
+    // Confirm decode.
+    let mut decoder = DeflateDecoder::new(encoded.as_slice());
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded).expect("decode");
+    assert_eq!(decoded, data);
+}
+
+#[test]
+fn fast_path_compresses_text() {
+    // English text with repetition — LZ77 should find matches.
+    let phrase = b"the quick brown fox jumps over the lazy dog. ";
+    let mut data = Vec::with_capacity(phrase.len() * 200);
+    for _ in 0..200 {
+        data.extend_from_slice(phrase);
+    }
+    let encoded = deflate_level(&data, Level::Fast);
+    let ratio = encoded.len() as f64 / data.len() as f64;
+    assert!(
+        ratio < 0.20,
+        "expected text compression ratio < 0.20, got {ratio:.3} (encoded {} from {})",
+        encoded.len(), data.len()
+    );
+    let mut decoder = DeflateDecoder::new(encoded.as_slice());
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded).expect("decode");
+    assert_eq!(decoded, data);
+}
+
+#[test]
+fn fast_path_handles_random_without_panic() {
+    // Random data: LZ77 finds few/no matches; output is ~1.05× raw
+    // due to Huffman overhead. We just want no panic + valid roundtrip.
+    let mut s = 0x12345678u64;
+    let mut data = Vec::with_capacity(8192);
+    for _ in 0..8192 {
+        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        data.push((s >> 32) as u8);
+    }
+    let encoded = deflate(&data);
+    let mut decoder = DeflateDecoder::new(encoded.as_slice());
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded).expect("decode");
+    assert_eq!(decoded, data);
 }

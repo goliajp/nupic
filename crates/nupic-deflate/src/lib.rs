@@ -26,18 +26,48 @@
 
 #![allow(clippy::inline_always)]
 
+mod tables;
+mod lz77;
+
 use nupic_bits::{BitWriter, adler32_update};
 
 /// Maximum bytes per stored (uncompressed) DEFLATE block (RFC 1951 §3.2.4).
 const STORED_MAX: usize = 65_535;
 
-/// Encode `data` as a RFC 1951 DEFLATE bitstream (no zlib wrapper).
-///
-/// Phase 1.0 implementation: one or more **stored blocks**. Output is
-/// approximately `1.0005 × len(data) + 5` bytes (5-byte block header
-/// every 65 535 bytes of payload).
+/// Compression level for `deflate` / `zlib_compress`.
+#[derive(Clone, Copy, Debug, Default)]
+pub enum Level {
+    /// Stored blocks only — no compression, but valid DEFLATE. Output
+    /// is `~ 1.0005 × len(data)`. Phase 1.0.0.
+    Stored,
+    /// Greedy LZ77 + static Huffman, single block. Phase 1.0.1.
+    /// Output is ~`zlib level 1` class on plain text;same as
+    /// [`Level::Stored`] on incompressible random data(falls back to
+    /// stored automatically per block size heuristic).
+    #[default]
+    Fast,
+}
+
+/// One-shot encode at the default level(currently [`Level::Fast`]).
 #[must_use]
 pub fn deflate(data: &[u8]) -> Vec<u8> {
+    deflate_level(data, Level::default())
+}
+
+/// One-shot encode at a specific level.
+#[must_use]
+pub fn deflate_level(data: &[u8], level: Level) -> Vec<u8> {
+    match level {
+        Level::Stored => deflate_stored(data),
+        Level::Fast => lz77::deflate_fast(data),
+    }
+}
+
+/// Encode `data` as a RFC 1951 DEFLATE bitstream using **stored
+/// blocks only** — no compression. Public to support
+/// `Level::Stored` and unit tests.
+#[must_use]
+pub fn deflate_stored(data: &[u8]) -> Vec<u8> {
     let mut w = BitWriter::with_capacity(data.len() + data.len() / 1024 + 16);
     let n = data.len();
     let mut written = 0;
@@ -101,7 +131,7 @@ pub fn zlib_compress(data: &[u8]) -> Vec<u8> {
         flg |= need;
     }
 
-    let deflated = deflate(data);
+    let deflated = deflate_level(data, Level::default());
     let adler = adler32_update(data, 1);
 
     let mut out = Vec::with_capacity(deflated.len() + 6);

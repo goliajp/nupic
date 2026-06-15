@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-bits"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "adler32",
  "crc32fast",
@@ -1047,7 +1047,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-cli"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -1060,7 +1060,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-color"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "fast-srgb8",
  "image",
@@ -1070,7 +1070,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-core"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "ab_glyph",
  "clap",
@@ -1091,7 +1091,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-deflate"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "flate2",
  "nupic-bits",
@@ -1099,7 +1099,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-quantize"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "image",
  "imagequant",
@@ -1113,17 +1113,19 @@ dependencies = [
 
 [[package]]
 name = "nupic-research"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "adler32",
  "anyhow",
  "crc32fast",
  "fast-srgb8",
+ "flate2",
  "image",
  "imagequant",
  "nupic-bits",
  "nupic-color",
  "nupic-core",
+ "nupic-deflate",
  "nupic-quantize",
  "nupic-ssimulacra",
  "oklab",
@@ -1138,7 +1140,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-ssimulacra"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "image",
  "rayon",
