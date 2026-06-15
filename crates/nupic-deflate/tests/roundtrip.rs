@@ -1,13 +1,18 @@
-//! Cement-oracle round-trip tests for phase 1.0 (stored blocks only).
+//! Cement-oracle round-trip tests for nupic-deflate.
 //!
-//! `flate2` (via `miniz_oxide`) is used as the reference decoder.
-//! Round-tripping nupic-deflate output through it verifies the bit
-//! stream is RFC 1951 / RFC 1950 compliant.
+//! `flate2` (via `miniz_oxide`) is the reference decoder. Round-tripping
+//! nupic-deflate output through it verifies the bit stream is RFC 1951 /
+//! RFC 1950 compliant. Scenario tests cover all three levels (Stored,
+//! Fast, Best) on canonical inputs; the `quickcheck` block at the
+//! bottom of the file fuzzes the same property on arbitrary byte
+//! sequences.
 
 use std::io::Read;
 
 use flate2::read::{DeflateDecoder, ZlibDecoder};
 use nupic_deflate::{Level, deflate, deflate_level, deflate_stored, zlib_compress};
+use quickcheck::TestResult;
+use quickcheck_macros::quickcheck;
 
 fn deflate_roundtrip(input: &[u8]) {
     let encoded = deflate(input);
@@ -404,4 +409,99 @@ fn fast_path_handles_random_without_panic() {
     let mut decoded = Vec::new();
     decoder.read_to_end(&mut decoded).expect("decode");
     assert_eq!(decoded, data);
+}
+
+// =====================================================================
+// Phase 1.3 — quickcheck property fuzz
+// =====================================================================
+//
+// Each property runs the default 100 random inputs (quickcheck default).
+// Property failures are shrunk to a minimal counter-example so any bug
+// surfaces with a short, reproducible byte sequence.
+
+#[quickcheck]
+fn prop_deflate_default_roundtrips(data: Vec<u8>) -> bool {
+    let encoded = deflate(&data);
+    let mut decoder = DeflateDecoder::new(encoded.as_slice());
+    let mut decoded = Vec::new();
+    if decoder.read_to_end(&mut decoded).is_err() {
+        return false;
+    }
+    decoded == data
+}
+
+#[quickcheck]
+fn prop_deflate_fast_roundtrips(data: Vec<u8>) -> bool {
+    let encoded = deflate_level(&data, Level::Fast);
+    let mut decoder = DeflateDecoder::new(encoded.as_slice());
+    let mut decoded = Vec::new();
+    if decoder.read_to_end(&mut decoded).is_err() {
+        return false;
+    }
+    decoded == data
+}
+
+#[quickcheck]
+fn prop_deflate_stored_roundtrips(data: Vec<u8>) -> bool {
+    let encoded = deflate_stored(&data);
+    let mut decoder = DeflateDecoder::new(encoded.as_slice());
+    let mut decoded = Vec::new();
+    if decoder.read_to_end(&mut decoded).is_err() {
+        return false;
+    }
+    decoded == data
+}
+
+#[quickcheck]
+fn prop_zlib_roundtrips_via_flate2(data: Vec<u8>) -> bool {
+    let encoded = zlib_compress(&data);
+    let mut decoder = ZlibDecoder::new(encoded.as_slice());
+    let mut decoded = Vec::new();
+    if decoder.read_to_end(&mut decoded).is_err() {
+        return false;
+    }
+    decoded == data
+}
+
+#[quickcheck]
+fn prop_best_never_loses_to_fast(data: Vec<u8>) -> bool {
+    let fast = deflate_level(&data, Level::Fast).len();
+    let best = deflate_level(&data, Level::Best).len();
+    best <= fast
+}
+
+#[quickcheck]
+fn prop_zlib_header_passes_fcheck(data: Vec<u8>) -> TestResult {
+    if data.is_empty() {
+        // FCHECK still applies but the property body is more interesting
+        // on non-empty inputs; let quickcheck broaden coverage.
+    }
+    let encoded = zlib_compress(&data);
+    if encoded.len() < 2 {
+        return TestResult::failed();
+    }
+    let cmf = u16::from(encoded[0]);
+    let flg = u16::from(encoded[1]);
+    if (cmf * 256 + flg) % 31 != 0 {
+        return TestResult::failed();
+    }
+    // CMF byte should be 0x78 (CM=8 DEFLATE + CINFO=7 32 KiB window).
+    if encoded[0] != 0x78 {
+        return TestResult::failed();
+    }
+    TestResult::passed()
+}
+
+#[quickcheck]
+fn prop_zlib_adler32_matches_input(data: Vec<u8>) -> bool {
+    use nupic_bits::adler32;
+    let encoded = zlib_compress(&data);
+    let n = encoded.len();
+    if n < 6 {
+        return false;
+    }
+    let adler_be = &encoded[n - 4..];
+    let claimed = u32::from_be_bytes(adler_be.try_into().unwrap());
+    let actual = adler32(&data);
+    claimed == actual
 }

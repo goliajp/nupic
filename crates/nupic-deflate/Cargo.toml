@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Self-built DEFLATE encoder (RFC 1951) and zlib wrapper (RFC 1950). Stage 1 of the nupic PNG codec roadmap. Stage 1.2 emits multi-block DEFLATE (1/2/4/8 equal-token partitions, per-block static/dynamic Huffman) via lazy LZ77 hash chain (depth 128, lazy threshold 16); strictly beats zlib level 9 on heterogeneous structured text. Depends only on `nupic-bits` for CRC / Adler / bit I/O."
+description = "Self-built DEFLATE encoder (RFC 1951) and zlib wrapper (RFC 1950). Stage 1 of the nupic PNG codec roadmap. Stage 1.3 ships graduation polish — multi-block DEFLATE via lazy LZ77 hash chain (depth 128, lazy threshold 16, N ∈ {1,2,4,8} partitions, per-block static/dynamic Huffman), validated by ~210 unit + scenario + quickcheck-fuzzed property tests vs flate2/miniz_oxide oracle, and benched against zlib L1/L6/L9 + zopfli on a 7-input corpus. Depends only on `nupic-bits` for CRC / Adler / bit I/O."
 
 [dependencies]
 nupic-bits = { path = "../nupic-bits" }
@@ -14,3 +14,8 @@ nupic-bits = { path = "../nupic-bits" }
 [dev-dependencies]
 # Cement oracles — verify our output round-trips through real decompressors.
 flate2 = "1"
+# Sibling stone — used in property tests to verify Adler-32 footer.
+nupic-bits = { path = "../nupic-bits" }
+# Property-based fuzz oracle — randomized roundtrip coverage.
+quickcheck = "1"
+quickcheck_macros = "1"

@@ -1,8 +1,10 @@
-//! Phase 1.0.2 sanity check: compare nupic-deflate Fast (static
-//! Huffman, phase 1.0.1) and Best (best of {stored, static, dynamic},
-//! phase 1.0.2) against zlib levels 1 / 6 / 9.
+//! Phase 1.3 graduation bench: compare nupic-deflate Fast (static
+//! Huffman, phase 1.0.1) and Best (lazy LZ77 + multi-block dynamic
+//! Huffman + chooser, phase 1.2) against zlib levels 1 / 6 / 9 and
+//! against **zopfli** (the pure-rust port of the cement zopfli
+//! algorithm — DEFLATE absolute ceiling for non-zopfli-class encoders).
 //!
-//! Backs `docs/research/png/06-quater-deflate-dynamic.md`. Run:
+//! Backs `docs/research/png/06-seven-deflate-graduation.md`. Run:
 //!   cargo run --release -p nupic-research --example deflate_compare
 
 use std::fs;
@@ -38,8 +40,6 @@ fn main() -> Result<()> {
     if let Some(b) = pluto {
         inputs.push(("02-pluto-png-stream", b));
     }
-    // English prose payload — exercises dynamic Huffman more than the
-    // 45-byte phrase repeat (which has trivially low entropy).
     let lorem = b"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do \
 eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim \
 veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo \
@@ -51,7 +51,6 @@ sunt in culpa qui officia deserunt mollit anim id est laborum.";
         for _ in 0..20 { buf.extend_from_slice(lorem); }
         buf
     }));
-    // Real-world structured text — distinguishes greedy from lazy match.
     if let Ok(b) = fs::read(root.join("Cargo.lock")) {
         inputs.push(("cargo-lock", b));
     }
@@ -60,11 +59,11 @@ sunt in culpa qui officia deserunt mollit anim id est laborum.";
     }
 
     println!(
-        "{:<22} {:>10}  {:>10} {:>10}  {:>10} {:>10} {:>10}   {:>8} {:>8} {:>8} {:>8}",
+        "{:<22} {:>9}  {:>9} {:>9}  {:>9} {:>9} {:>9} {:>9}   {:>6} {:>6} {:>6}",
         "input", "raw",
         "nupic_F", "nupic_B",
-        "zl_1", "zl_6", "zl_9",
-        "B/zl1", "B/zl6", "B/zl9", "B/F",
+        "zl_1", "zl_6", "zl_9", "zopfli",
+        "B/zl9", "B/zop", "F/B",
     );
     println!("{}", "-".repeat(124));
 
@@ -77,16 +76,18 @@ sunt in culpa qui officia deserunt mollit anim id est laborum.";
         let zl1 = compress_zlib(data, 1);
         let zl6 = compress_zlib(data, 6);
         let zl9 = compress_zlib(data, 9);
+        let zop = compress_zopfli(data);
 
         let f = nupic_fast.len();
         let b = nupic_best.len();
-        let r_z1 = b as f64 / zl1.len() as f64;
-        let r_z6 = b as f64 / zl6.len() as f64;
         let r_z9 = b as f64 / zl9.len() as f64;
-        let r_bf = b as f64 / f as f64;
+        let r_zop = b as f64 / zop.len() as f64;
+        let r_fb = f as f64 / b as f64;
         println!(
-            "{:<22} {:>10}  {:>10} {:>10}  {:>10} {:>10} {:>10}   {:>7.2}× {:>7.2}× {:>7.2}× {:>7.2}×",
-            name, raw_len, f, b, zl1.len(), zl6.len(), zl9.len(), r_z1, r_z6, r_z9, r_bf,
+            "{:<22} {:>9}  {:>9} {:>9}  {:>9} {:>9} {:>9} {:>9}   {:>5.2}× {:>5.2}× {:>5.2}×",
+            name, raw_len, f, b,
+            zl1.len(), zl6.len(), zl9.len(), zop.len(),
+            r_z9, r_zop, r_fb,
         );
     }
     Ok(())
@@ -96,6 +97,13 @@ fn compress_zlib(data: &[u8], level: u32) -> Vec<u8> {
     let mut encoder = DeflateEncoder::new(Vec::new(), Compression::new(level));
     encoder.write_all(data).unwrap();
     encoder.finish().unwrap()
+}
+
+fn compress_zopfli(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len());
+    zopfli::compress(zopfli::Options::default(), zopfli::Format::Deflate, data, &mut out)
+        .expect("zopfli compress");
+    out
 }
 
 fn workspace_root() -> Result<PathBuf> {

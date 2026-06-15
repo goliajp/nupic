@@ -22,6 +22,7 @@ nupic-deflate = { path = "../nupic-deflate" }
 crc32fast = { workspace = true }
 adler32 = { workspace = true }
 flate2 = "1"
+zopfli = "0.8"
 imagequant = { workspace = true }
 png = { workspace = true }
 oxipng = { workspace = true }

@@ -3,7 +3,8 @@
 //!
 //! Stage 1 of the [PNG codec roadmap](../../docs/roadmap.md);see the
 //! `docs/research/png/06-nupic-deflate-design.md` essay for the phase
-//! plan. Currently phase 1.2:
+//! plan. Currently phase 1.3 (stage 1 graduation polish — bench
+//! against zopfli + property-fuzzed roundtrip):
 //!
 //! - **Stored blocks**(BTYPE=00)— infrastructure, no compression.
 //!   Output is `~1.0005 ×` raw(per-block 5-byte header). Phase 1.0.0.
@@ -22,9 +23,15 @@
 //!   Huffman. Phase 1.2 (current default `Level::Best`). Strictly
 //!   beats `zlib level 9` size on heterogeneous structured text
 //!   (Cargo.lock, source files); equals or beats it on prose and PNG.
+//! - **Graduation polish** — quickcheck-fuzzed roundtrip + zopfli
+//!   absolute-ceiling bench. 5/7 corpus inputs ≤ 1.05× zopfli (stage 1
+//!   graduation criterion). Phase 1.3 — see
+//!   `docs/research/png/06-seven-deflate-graduation.md`. Fixes a
+//!   stored-fallback bit-cost under-count caught by the new fuzz.
 //!
-//! Round-trips through `flate2` / `miniz_oxide` / `zlib` are validated
-//! in the test suite.
+//! Round-trips through `flate2` / `miniz_oxide` are validated by both
+//! scenario tests (canonical inputs at every level) and quickcheck
+//! property fuzz (arbitrary byte sequences) in the test suite.
 //!
 //! # Examples
 //!

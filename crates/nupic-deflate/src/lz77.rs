@@ -76,11 +76,15 @@ pub fn deflate_best(data: &[u8]) -> Vec<u8> {
     // Find best block partition. Always at least 1 block (no split).
     let (partition, multi_bits) = best_partition(&tokens);
 
-    // Compare against a whole-call stored fallback.
+    // Compare against a whole-call stored fallback. Exact bit count
+    // when `deflate_stored` starts at an empty BitWriter:
+    //   BFINAL+BTYPE (3) + align-to-byte (5, since pos=3 → 8) +
+    //   LEN+NLEN (32) + N*8 raw = 40 + 8N bits.
+    // Earlier code used `16 + 8N` which under-counted the header by
+    // 24 bits, making the chooser pick stored on tiny inputs (e.g.
+    // a 7-byte fuzz finding: stored is 12 bytes, static is 10).
     let stored_bits = if data.len() <= STORED_MAX_FOR_BEST {
-        // Tight upper bound on stored-block size:
-        //   3 header bits + ≤ 7 align bits + 4 (LEN+NLEN) + N raw bytes
-        Some(16u64 + (data.len() as u64) * 8)
+        Some(40u64 + (data.len() as u64) * 8)
     } else {
         None
     };
