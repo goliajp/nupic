@@ -16,6 +16,7 @@ path = "src/lib.rs"
 nupic-core = { workspace = true }
 nupic-color = { path = "../nupic-color" }
 nupic-ssimulacra = { path = "../nupic-ssimulacra" }
+nupic-quantize = { path = "../nupic-quantize" }
 imagequant = { workspace = true }
 png = { workspace = true }
 oxipng = { workspace = true }

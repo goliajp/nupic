@@ -137,32 +137,45 @@ pub fn train_palette(
 /// Hard-quantise an RGBA8 source against a pre-trained OKLab palette.
 /// For each pixel: convert to OKLab, take argmin L2 over palette.
 /// **No dither** — that's the Stone C insight.
+///
+/// rayon-parallel across pixels (work-stealing thread pool). Each
+/// pixel is independent so this scales close to N-cores. The branchy
+/// `if d2 < best_d2` is kept scalar inside the per-pixel loop — LLVM
+/// has shown (Stone A) that portable SIMD wrappers don't beat the
+/// auto-vectorised straight-line tightly-bounded inner loop on M2.
 pub fn apply_palette(
     src_rgba: &[u8],
     width: u32,
     height: u32,
     palette: &[Oklab],
 ) -> (Vec<u8>, Vec<Rgb<u8>>) {
+    use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+    use rayon::slice::{ParallelSlice, ParallelSliceMut};
+
     let n_pixels = (width as usize) * (height as usize);
     assert_eq!(src_rgba.len(), n_pixels * 4);
     let k = palette.len();
     let mut indices = vec![0u8; n_pixels];
-    for i in 0..n_pixels {
-        let off = i * 4;
-        let p = srgb_u8_to_oklab(Rgb { r: src_rgba[off], g: src_rgba[off + 1], b: src_rgba[off + 2] });
-        let mut best_j = 0usize;
-        let mut best_d2 = f32::INFINITY;
-        for j in 0..k {
-            let pj = palette[j];
-            let dl = p.l - pj.l; let da = p.a - pj.a; let db = p.b - pj.b;
-            let d2 = dl * dl + da * da + db * db;
-            if d2 < best_d2 {
-                best_d2 = d2;
-                best_j = j;
+    src_rgba
+        .par_chunks_exact(4)
+        .zip(indices.par_chunks_exact_mut(1))
+        .for_each(|(px, idx)| {
+            let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
+            let mut best_j = 0usize;
+            let mut best_d2 = f32::INFINITY;
+            for j in 0..k {
+                let pj = palette[j];
+                let dl = p.l - pj.l;
+                let da = p.a - pj.a;
+                let db = p.b - pj.b;
+                let d2 = dl.mul_add(dl, da.mul_add(da, db * db));
+                if d2 < best_d2 {
+                    best_d2 = d2;
+                    best_j = j;
+                }
             }
-        }
-        indices[i] = best_j as u8;
-    }
+            idx[0] = best_j as u8;
+        });
     let palette_srgb: Vec<Rgb<u8>> = palette.iter().map(|c| oklab_to_srgb_u8(*c)).collect();
     (indices, palette_srgb)
 }

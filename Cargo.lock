@@ -1084,6 +1084,7 @@ dependencies = [
  "nupic-ssimulacra",
  "oxipng",
  "png",
+ "rayon",
  "rgb",
 ]
 
@@ -1097,6 +1098,7 @@ dependencies = [
  "imagequant",
  "nupic-color",
  "nupic-core",
+ "nupic-quantize",
  "nupic-ssimulacra",
  "oklab",
  "oxipng",
