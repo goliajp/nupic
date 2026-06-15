@@ -36,6 +36,7 @@ crates/nupic-research/   ─ experiments backing the essays
 ## Current essays
 
 - [`png/00-attack-surface.md`](png/00-attack-surface.md) — anchor 篇
+- [`png/01-pluto-case.md`](png/01-pluto-case.md) — 02-pluto 上 imagequant 的 algorithmic ceiling;cement-layer adaptive q_target spec(实测 sweep 推外延总体 0.66× TinyPNG)
 
 ## Companion crate
 

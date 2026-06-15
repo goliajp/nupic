@@ -1036,7 +1036,13 @@ dependencies = [
 name = "nupic-research"
 version = "0.4.0"
 dependencies = [
+ "anyhow",
+ "image",
+ "imagequant",
  "nupic-core",
+ "oxipng",
+ "png",
+ "rgb",
 ]
 
 [[package]]
