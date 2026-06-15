@@ -14,6 +14,8 @@ path = "src/lib.rs"
 
 [dependencies]
 nupic-core = { workspace = true }
+nupic-color = { path = "../nupic-color" }
+nupic-ssimulacra = { path = "../nupic-ssimulacra" }
 imagequant = { workspace = true }
 png = { workspace = true }
 oxipng = { workspace = true }

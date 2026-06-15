@@ -12,3 +12,4 @@
 //!   applied,yuvxyb for color conversion). Backs essay 03b-bis.
 
 pub mod ssim_b1;
+pub mod codebook_c0;
