@@ -46,6 +46,7 @@ crates/nupic-research/   ─ experiments backing the essays
 - [`png/01-pluto-case.md`](png/01-pluto-case.md) — 02-pluto 上 imagequant 的 algorithmic ceiling;cement-layer adaptive q_target spec(基于 DSSIM,已被 02 supersede)
 - [`png/02-perceptual-metrics.md`](png/02-perceptual-metrics.md) — 用 SSIMULACRA2 替代肉眼判断;7 图 metric 对照得 nupic 0.4 在 SSIMULACRA2 上 5/7 胜 TinyPNG;给出 metric-grounded 0.4.1 cement-fix spec(总体 0.95× TinyPNG,质量不退化)
 - [`png/03-perceptual-stone.md`](png/03-perceptual-stone.md) — stone-layer 设计 anchor;5 stones (OKLab / SSIMULACRA2 / codebook / dither / filter-search) 每个的 perf/mem/disk/cov/doc ceiling 数字 + 依赖图 + 子 essay roadmap。Ceiling-first 价值观的首次落地。
+- [`png/03a-oklab-design.md`](png/03a-oklab-design.md) — Stone A 详细设计 + 实测;naive scalar 8.18 ms / 02-pluto 精准命中 03 估计;oklab crate (LUT) 1.88 ms;距离 bandwidth ceiling 0.06 ms 还有 31×;给 stone A0→A4 attack plan。
 
 ## Companion crate
 
