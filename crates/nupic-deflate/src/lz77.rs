@@ -1,7 +1,14 @@
-//! Phase 1.0.1: greedy LZ77 hash chain + static Huffman block.
+//! Greedy LZ77 hash chain (phase 1.0.1) + per-block format chooser
+//! (phase 1.0.2: best of stored / static Huffman / dynamic Huffman).
 //!
-//! Single-block output. Format: BFINAL=1 + BTYPE=01 (fixed Huffman)
-//! + token stream + EOB symbol 256. Per RFC 1951 §3.2.5 + §3.2.6.
+//! Single-block output. The encoder collects an LZ77 token stream
+//! once, then picks the smallest of three valid DEFLATE encodings:
+//!
+//! * BTYPE=00 stored — raw passthrough, ~1.0005× input.
+//! * BTYPE=01 static Huffman — RFC 1951 §3.2.6 fixed code, no header
+//!   overhead beyond 3 bits.
+//! * BTYPE=10 dynamic Huffman — frequency-tuned canonical Huffman
+//!   tree (length-limited 15) emitted in the RFC 1951 §3.2.7 header.
 //!
 //! Hash chain follows zlib's classic design: 15-bit hash from the
 //! first 3 bytes of the lookahead; `hash_head[hash]` points to the
@@ -12,6 +19,8 @@
 
 use nupic_bits::BitWriter;
 
+use crate::deflate_stored;
+use crate::huffman::{CL_CODE_ORDER, canonical_codes, limited_lengths, rle_code_lengths};
 use crate::tables::{
     DIST_CODES, DIST_SYM_SMALL, LENGTH_SYM, LIT_LEN_CODES, dist_sym_large,
 };
@@ -25,43 +34,120 @@ const MAX_MATCH: usize = 258;
 const MAX_CHAIN: usize = 32;
 const NIL: u32 = u32::MAX;
 
-/// Encode `data` as a single static-Huffman DEFLATE block. Empty
-/// inputs emit an EOB-only block.
-pub fn deflate_fast(data: &[u8]) -> Vec<u8> {
+const NUM_LIT_LEN: usize = 286;
+const NUM_DIST: usize = 30;
+const NUM_CL: usize = 19;
+const MAX_LIT_LEN_BITS: u8 = 15;
+const MAX_DIST_BITS: u8 = 15;
+const MAX_CL_BITS: u8 = 7;
+
+#[derive(Clone, Copy)]
+enum Token {
+    Literal(u8),
+    Match { length: u16, distance: u16 },
+}
+
+/// Encode `data` as a single static-Huffman DEFLATE block.
+pub fn deflate_static(data: &[u8]) -> Vec<u8> {
+    let tokens = collect_tokens(data);
     let mut w = BitWriter::with_capacity(data.len() / 2 + 16);
+    emit_static_block(&mut w, &tokens);
+    w.into_bytes()
+}
 
-    // BFINAL = 1, BTYPE = 01 (fixed Huffman)
-    w.write_bits(1, 1);
-    w.write_bits(0b01, 2);
+/// Encode `data` as a single block, picking the smallest of
+/// {stored, static Huffman, dynamic Huffman}.
+///
+/// `stored` is only considered when `data.len() ≤ 65 535` (RFC 1951
+/// stored-block length cap); above that bound the chooser stays on
+/// {static, dynamic}, which both support arbitrary block sizes.
+pub fn deflate_best(data: &[u8]) -> Vec<u8> {
+    let tokens = collect_tokens(data);
 
-    let n = data.len();
-    if n < MIN_MATCH {
-        // All literals — chain init is moot.
-        for &b in data {
-            emit_literal(&mut w, b);
+    let static_bits = static_block_bits(&tokens);
+    let dyn_plan = DynamicPlan::build(&tokens);
+    let dynamic_bits = dyn_plan.total_bits();
+    let stored_bits = if data.len() <= STORED_MAX_FOR_BEST {
+        // header(3) + align + 4 bytes (LEN+NLEN) + raw bytes
+        // Worst-case: 3 header bits, then ≤7 align bits, then 4 + N bytes.
+        // Use the precise per-byte form: 3 + align_to_8 + (4+N)*8.
+        // Since we're picking best, use upper bound = 16 + N*8 (this is
+        // an overestimate by at most 5 bits; never picks stored when it
+        // would actually be worse).
+        Some(16u64 + (data.len() as u64) * 8)
+    } else {
+        None
+    };
+
+    let (best_bits, choice) = best_of(static_bits, dynamic_bits, stored_bits);
+
+    match choice {
+        BlockChoice::Static => {
+            let mut w = BitWriter::with_capacity((best_bits / 8 + 16) as usize);
+            emit_static_block(&mut w, &tokens);
+            w.into_bytes()
         }
-        emit_symbol(&mut w, 256); // EOB
-        return w.into_bytes();
+        BlockChoice::Dynamic => {
+            let mut w = BitWriter::with_capacity((best_bits / 8 + 16) as usize);
+            emit_dynamic_block(&mut w, &tokens, &dyn_plan);
+            w.into_bytes()
+        }
+        BlockChoice::Stored => deflate_stored(data),
     }
+}
 
+const STORED_MAX_FOR_BEST: usize = 65_535;
+
+#[derive(Clone, Copy)]
+enum BlockChoice {
+    Static,
+    Dynamic,
+    Stored,
+}
+
+fn best_of(static_bits: u64, dynamic_bits: u64, stored_bits: Option<u64>) -> (u64, BlockChoice) {
+    let mut best = (static_bits, BlockChoice::Static);
+    if dynamic_bits < best.0 {
+        best = (dynamic_bits, BlockChoice::Dynamic);
+    }
+    if let Some(sb) = stored_bits {
+        if sb < best.0 {
+            best = (sb, BlockChoice::Stored);
+        }
+    }
+    best
+}
+
+// =====================================================================
+// Token collection (greedy LZ77 hash chain — unchanged from phase 1.0.1)
+// =====================================================================
+
+fn collect_tokens(data: &[u8]) -> Vec<Token> {
+    let n = data.len();
+    let mut tokens: Vec<Token> = Vec::with_capacity(n / 2 + 1);
+    if n < MIN_MATCH {
+        for &b in data {
+            tokens.push(Token::Literal(b));
+        }
+        return tokens;
+    }
     let mut hash_head = vec![NIL; HASH_SIZE];
     let mut hash_prev = vec![NIL; WIN_SIZE];
     let mut i = 0usize;
-
     while i < n {
-        // Try to find a match starting at i.
         let (best_len, best_dist) = if i + MIN_MATCH <= n {
             let h = hash3(&data[i..]);
             let head = hash_head[h];
-            let (m_len, m_dist) = find_longest_match(data, i, head, &hash_prev);
-            (m_len, m_dist)
+            find_longest_match(data, i, head, &hash_prev)
         } else {
             (0, 0)
         };
 
         if best_len >= MIN_MATCH {
-            emit_match(&mut w, best_len, best_dist);
-            // Insert hashes for all positions in the match into the chain.
+            tokens.push(Token::Match {
+                length: best_len as u16,
+                distance: best_dist as u16,
+            });
             let mut k = 0;
             while k < best_len && i + k + MIN_MATCH <= n {
                 insert_hash(&mut hash_head, &mut hash_prev, data, i + k);
@@ -69,21 +155,18 @@ pub fn deflate_fast(data: &[u8]) -> Vec<u8> {
             }
             i += best_len;
         } else {
-            emit_literal(&mut w, data[i]);
+            tokens.push(Token::Literal(data[i]));
             if i + MIN_MATCH <= n {
                 insert_hash(&mut hash_head, &mut hash_prev, data, i);
             }
             i += 1;
         }
     }
-
-    emit_symbol(&mut w, 256); // EOB
-    w.into_bytes()
+    tokens
 }
 
 #[inline]
 fn hash3(window: &[u8]) -> usize {
-    // 3-byte hash — zlib-class: shift + xor mix into HASH_BITS.
     let b0 = window[0] as u32;
     let b1 = window[1] as u32;
     let b2 = window[2] as u32;
@@ -125,12 +208,10 @@ fn find_longest_match(
     while chain_pos != NIL && (chain_pos as usize) >= min_pos && depth < MAX_CHAIN {
         depth += 1;
         let cp = chain_pos as usize;
-        // Quick reject: 3-byte head must match
         if data[cp] == data[pos]
             && data[cp + 1] == data[pos + 1]
             && data[cp + 2] == data[pos + 2]
         {
-            // count further matching bytes
             let mut k = 3;
             while k < max_len_here && data[cp + k] == data[pos + k] {
                 k += 1;
@@ -143,7 +224,6 @@ fn find_longest_match(
                 }
             }
         }
-        // walk chain
         let next = hash_prev[(chain_pos as usize) % WIN_SIZE];
         if next == NIL || next >= chain_pos {
             break;
@@ -153,55 +233,59 @@ fn find_longest_match(
     (best_len, best_dist)
 }
 
-#[inline]
-fn emit_literal(w: &mut BitWriter, byte: u8) {
-    emit_symbol(w, byte as u16);
+// =====================================================================
+// Token → DEFLATE symbol mapping
+// =====================================================================
+
+/// Resolved symbol info for a token. `dist` is `None` for literals.
+struct TokenSyms {
+    lit_sym: u16,
+    len_extra_val: u32,
+    len_extra_bits: u8,
+    dist: Option<DistSyms>,
+}
+struct DistSyms {
+    sym: u8,
+    extra_val: u32,
+    extra_bits: u8,
 }
 
 #[inline]
-fn emit_symbol(w: &mut BitWriter, sym: u16) {
-    let (code, bits) = LIT_LEN_CODES[sym as usize];
-    w.write_bits(code, bits);
-}
-
-#[inline]
-fn emit_match(w: &mut BitWriter, length: usize, distance: usize) {
-    debug_assert!(length >= MIN_MATCH && length <= MAX_MATCH);
-    debug_assert!(distance >= 1 && distance <= WIN_SIZE);
-    // length code + extra bits
-    let (len_sym, len_extra_bits, len_base_low) = LENGTH_SYM[length - 3];
-    let _ = len_base_low; // tables.rs notes ignored field
-    emit_symbol(w, len_sym);
-    if len_extra_bits > 0 {
-        let base = length_base(len_sym);
-        let extra = (length - base) as u32;
-        w.write_bits(extra, len_extra_bits);
+fn token_syms(t: Token) -> TokenSyms {
+    match t {
+        Token::Literal(b) => TokenSyms {
+            lit_sym: u16::from(b),
+            len_extra_val: 0,
+            len_extra_bits: 0,
+            dist: None,
+        },
+        Token::Match { length, distance } => {
+            let (len_sym, len_extra_bits, _base_low) = LENGTH_SYM[length as usize - 3];
+            let len_base = length_base(len_sym);
+            let len_extra_val = (length as u32) - (len_base as u32);
+            let (dsym, dbase, dextra) = if distance <= 256 {
+                let (s, b, e) = DIST_SYM_SMALL[distance as usize - 1];
+                (s, u32::from(b), e)
+            } else {
+                let (s, b, e) = dist_sym_large(u32::from(distance));
+                (s, b, e)
+            };
+            let dist_extra_val = u32::from(distance) - dbase;
+            TokenSyms {
+                lit_sym: len_sym,
+                len_extra_val,
+                len_extra_bits,
+                dist: Some(DistSyms {
+                    sym: dsym,
+                    extra_val: dist_extra_val,
+                    extra_bits: dextra,
+                }),
+            }
+        }
     }
-    // distance code + extra bits
-    let (dist_sym, dist_base, dist_extra_bits) = if distance <= 256 {
-        DIST_SYM_SMALL[distance - 1]
-    } else {
-        let (sym, base, extra) = dist_sym_large(distance as u32);
-        (sym, base as u16, extra)
-    };
-    let (dcode, dbits) = DIST_CODES[dist_sym as usize];
-    w.write_bits(dcode, dbits);
-    if dist_extra_bits > 0 {
-        let extra = (distance as u32) - (dist_base as u32);
-        w.write_bits(extra, dist_extra_bits);
-    }
 }
 
-/// Recover the base length for a given length symbol (avoids
-/// LENGTH_SYM's u8-truncated base field for lengths > 255).
 fn length_base(sym: u16) -> usize {
-    // 257..=264: base = sym - 254 = 3..=10
-    // 265: 11, 266: 13, 267: 15, 268: 17
-    // 269: 19, 270: 23, 271: 27, 272: 31
-    // 273: 35, 274: 43, 275: 51, 276: 59
-    // 277: 67, 278: 83, 279: 99, 280: 115
-    // 281: 131, 282: 163, 283: 195, 284: 227
-    // 285: 258
     match sym {
         257..=264 => (sym as usize) - 254,
         265 => 11, 266 => 13, 267 => 15, 268 => 17,
@@ -212,4 +296,236 @@ fn length_base(sym: u16) -> usize {
         285 => 258,
         _ => unreachable!("invalid length sym {sym}"),
     }
+}
+
+// =====================================================================
+// Static-Huffman block (BTYPE=01)
+// =====================================================================
+
+fn static_block_bits(tokens: &[Token]) -> u64 {
+    let mut bits = 3u64; // BFINAL + BTYPE
+    for &t in tokens {
+        let syms = token_syms(t);
+        bits += u64::from(LIT_LEN_CODES[syms.lit_sym as usize].1);
+        bits += u64::from(syms.len_extra_bits);
+        if let Some(d) = syms.dist {
+            bits += u64::from(DIST_CODES[d.sym as usize].1);
+            bits += u64::from(d.extra_bits);
+        }
+    }
+    bits += u64::from(LIT_LEN_CODES[256].1); // EOB
+    bits
+}
+
+fn emit_static_block(w: &mut BitWriter, tokens: &[Token]) {
+    w.write_bits(1, 1); // BFINAL
+    w.write_bits(0b01, 2); // BTYPE = static Huffman
+    for &t in tokens {
+        let syms = token_syms(t);
+        let (lc, lb) = LIT_LEN_CODES[syms.lit_sym as usize];
+        w.write_bits(lc, lb);
+        if syms.len_extra_bits > 0 {
+            w.write_bits(syms.len_extra_val, syms.len_extra_bits);
+        }
+        if let Some(d) = syms.dist {
+            let (dc, db) = DIST_CODES[d.sym as usize];
+            w.write_bits(dc, db);
+            if d.extra_bits > 0 {
+                w.write_bits(d.extra_val, d.extra_bits);
+            }
+        }
+    }
+    let (ec, eb) = LIT_LEN_CODES[256];
+    w.write_bits(ec, eb);
+}
+
+// =====================================================================
+// Dynamic-Huffman block (BTYPE=10) — phase 1.0.2
+// =====================================================================
+
+/// All the precomputed pieces needed to (a) compute exact dynamic
+/// block size for the chooser and (b) actually emit it.
+struct DynamicPlan {
+    lit_codes: Vec<(u32, u8)>,
+    dist_codes: Vec<(u32, u8)>,
+    cl_lens: Vec<u8>,
+    cl_codes: Vec<(u32, u8)>,
+    /// RLE encoding of (lit_lens[..hlit+257] ++ dist_lens[..hdist+1]).
+    rle: Vec<(u8, u32, u8)>,
+    /// Bits used by tokens body (without EOB; EOB already counted).
+    body_bits: u64,
+    hlit: u8,
+    hdist: u8,
+    hclen: u8,
+}
+
+impl DynamicPlan {
+    fn build(tokens: &[Token]) -> Self {
+        // 1. Frequencies.
+        let mut lit_freq = [0u32; NUM_LIT_LEN];
+        let mut dist_freq = [0u32; NUM_DIST];
+        let mut body_bits: u64 = 0;
+        for &t in tokens {
+            let syms = token_syms(t);
+            lit_freq[syms.lit_sym as usize] += 1;
+            body_bits += u64::from(syms.len_extra_bits);
+            if let Some(d) = syms.dist {
+                dist_freq[d.sym as usize] += 1;
+                body_bits += u64::from(d.extra_bits);
+            }
+        }
+        lit_freq[256] += 1; // EOB
+
+        // 2. Code lengths.
+        let lit_lens = limited_lengths(&lit_freq, MAX_LIT_LEN_BITS);
+        let mut dist_lens = limited_lengths(&dist_freq, MAX_DIST_BITS);
+
+        // RFC 1951 §3.2.7: when there are no distance codes used at all,
+        // the encoder may transmit a single dist code length of 0
+        // (HDIST=0). If exactly one dist symbol is used, our
+        // limited_lengths gives it length 1 — that's also fine. No
+        // dummy needed for the all-literals case.
+        // However, some decoders historically only accept HDIST=0 with
+        // a single-zero length when the encoder explicitly signals it.
+        // miniz_oxide handles this; we just emit the natural form.
+
+        // 3. HLIT / HDIST (trim trailing-zero lengths past the
+        // minimum-required count of 257 / 1).
+        let mut last_lit = 256; // EOB is always present, so min index 256
+        for i in (257..NUM_LIT_LEN).rev() {
+            if lit_lens[i] != 0 {
+                last_lit = i;
+                break;
+            }
+        }
+        let hlit = (last_lit - 256) as u8; // hlit + 257 = last_lit + 1
+        // Note: actual transmit count is hlit + 257 = last_lit + 1.
+
+        let mut last_dist = 0; // always transmit ≥ 1 dist length
+        for i in (1..NUM_DIST).rev() {
+            if dist_lens[i] != 0 {
+                last_dist = i;
+                break;
+            }
+        }
+        let hdist = last_dist as u8;
+        // Transmit count = hdist + 1.
+
+        // If all dist freqs are zero, ensure dist_lens[0] = 0 (it
+        // already is from limited_lengths; harmless to assert).
+        if dist_freq.iter().all(|&f| f == 0) {
+            dist_lens[0] = 0;
+        }
+
+        // 4. RLE-encode the concatenated length array.
+        let mut concat: Vec<u8> = Vec::with_capacity((hlit as usize + 257) + (hdist as usize + 1));
+        concat.extend_from_slice(&lit_lens[..hlit as usize + 257]);
+        concat.extend_from_slice(&dist_lens[..hdist as usize + 1]);
+        let rle = rle_code_lengths(&concat);
+
+        // 5. CL-alphabet frequencies + lengths.
+        let mut cl_freq = [0u32; NUM_CL];
+        for &(sym, _, _) in &rle {
+            cl_freq[sym as usize] += 1;
+        }
+        let cl_lens = limited_lengths(&cl_freq, MAX_CL_BITS);
+
+        // 6. HCLEN — trim trailing zero CL lengths in the transmission
+        // order. RFC requires ≥ 4 transmitted, so HCLEN ≥ 0
+        // (HCLEN + 4 transmitted entries).
+        let mut last_cl = 3;
+        for i in (4..NUM_CL).rev() {
+            let cl_idx = CL_CODE_ORDER[i];
+            if cl_lens[cl_idx] != 0 {
+                last_cl = i;
+                break;
+            }
+        }
+        let hclen = (last_cl - 3) as u8;
+
+        let cl_codes = canonical_codes(&cl_lens);
+        let lit_codes = canonical_codes(&lit_lens);
+        let dist_codes = canonical_codes(&dist_lens);
+
+        // body_bits currently holds only extra bits; add Huffman code bits.
+        for &t in tokens {
+            let syms = token_syms(t);
+            body_bits += u64::from(lit_lens[syms.lit_sym as usize]);
+            if let Some(d) = syms.dist {
+                body_bits += u64::from(dist_lens[d.sym as usize]);
+            }
+        }
+        body_bits += u64::from(lit_lens[256]); // EOB
+
+        DynamicPlan {
+            lit_codes,
+            dist_codes,
+            cl_lens,
+            cl_codes,
+            rle,
+            body_bits,
+            hlit,
+            hdist,
+            hclen,
+        }
+    }
+
+    fn header_bits(&self) -> u64 {
+        // BFINAL(1) + BTYPE(2) + HLIT(5) + HDIST(5) + HCLEN(4)
+        let mut bits = 1u64 + 2 + 5 + 5 + 4;
+        // (HCLEN + 4) × 3 bits for CL code lengths.
+        bits += u64::from(self.hclen + 4) * 3;
+        // RLE'd CL symbols (Huffman-coded) + their extra bits.
+        for &(sym, _, extra_bits) in &self.rle {
+            bits += u64::from(self.cl_lens[sym as usize]);
+            bits += u64::from(extra_bits);
+        }
+        bits
+    }
+
+    fn total_bits(&self) -> u64 {
+        self.header_bits() + self.body_bits
+    }
+}
+
+fn emit_dynamic_block(w: &mut BitWriter, tokens: &[Token], plan: &DynamicPlan) {
+    // Header.
+    w.write_bits(1, 1); // BFINAL
+    w.write_bits(0b10, 2); // BTYPE = dynamic Huffman
+    w.write_bits(u32::from(plan.hlit), 5);
+    w.write_bits(u32::from(plan.hdist), 5);
+    w.write_bits(u32::from(plan.hclen), 4);
+    // CL code lengths in the prescribed order.
+    let cl_count = plan.hclen as usize + 4;
+    for i in 0..cl_count {
+        let cl_idx = CL_CODE_ORDER[i];
+        w.write_bits(u32::from(plan.cl_lens[cl_idx]), 3);
+    }
+    // RLE'd lit/len + dist code lengths.
+    for &(sym, extra_val, extra_bits) in &plan.rle {
+        let (cc, cb) = plan.cl_codes[sym as usize];
+        w.write_bits(cc, cb);
+        if extra_bits > 0 {
+            w.write_bits(extra_val, extra_bits);
+        }
+    }
+    // Token body.
+    for &t in tokens {
+        let syms = token_syms(t);
+        let (lc, lb) = plan.lit_codes[syms.lit_sym as usize];
+        w.write_bits(lc, lb);
+        if syms.len_extra_bits > 0 {
+            w.write_bits(syms.len_extra_val, syms.len_extra_bits);
+        }
+        if let Some(d) = syms.dist {
+            let (dc, db) = plan.dist_codes[d.sym as usize];
+            w.write_bits(dc, db);
+            if d.extra_bits > 0 {
+                w.write_bits(d.extra_val, d.extra_bits);
+            }
+        }
+    }
+    // EOB.
+    let (ec, eb) = plan.lit_codes[256];
+    w.write_bits(ec, eb);
 }

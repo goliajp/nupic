@@ -1,12 +1,12 @@
-//! Phase 1.0.1 sanity check: compare nupic-deflate Fast vs zlib
-//! level 1 / level 6 / level 9 + libdeflate-class via miniz_oxide.
+//! Phase 1.0.2 sanity check: compare nupic-deflate Fast (static
+//! Huffman, phase 1.0.1) and Best (best of {stored, static, dynamic},
+//! phase 1.0.2) against zlib levels 1 / 6 / 9.
 //!
-//! Backs `docs/research/png/06-ter-deflate-lz77.md`. Run:
+//! Backs `docs/research/png/06-quater-deflate-dynamic.md`. Run:
 //!   cargo run --release -p nupic-research --example deflate_compare
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 use anyhow::{Context, Result};
 use flate2::Compression;
@@ -17,8 +17,6 @@ use std::io::Write;
 fn main() -> Result<()> {
     let root = workspace_root()?;
 
-    // Inputs: a small text payload, a repeats payload, a PNG IDAT-ish
-    // payload from our fixtures, and a random payload.
     let mut inputs: Vec<(&str, Vec<u8>)> = Vec::new();
     inputs.push(("repeats-10k", vec![0x42u8; 10_000]));
     inputs.push(("text-9k", {
@@ -40,29 +38,49 @@ fn main() -> Result<()> {
     if let Some(b) = pluto {
         inputs.push(("02-pluto-png-stream", b));
     }
+    // English prose payload — exercises dynamic Huffman more than the
+    // 45-byte phrase repeat (which has trivially low entropy).
+    let lorem = b"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do \
+eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim \
+veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo \
+consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum \
+dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, \
+sunt in culpa qui officia deserunt mollit anim id est laborum.";
+    inputs.push(("lorem-prose", {
+        let mut buf = Vec::with_capacity(lorem.len() * 20);
+        for _ in 0..20 { buf.extend_from_slice(lorem); }
+        buf
+    }));
 
-    println!("{:<22} {:>10}  {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
-             "input", "raw", "nupic_F", "zl_1", "zl_6", "zl_9", "vs_zl_1", "vs_zl_9");
-    println!("{}", "-".repeat(96));
+    println!(
+        "{:<22} {:>10}  {:>10} {:>10}  {:>10} {:>10} {:>10}   {:>8} {:>8} {:>8} {:>8}",
+        "input", "raw",
+        "nupic_F", "nupic_B",
+        "zl_1", "zl_6", "zl_9",
+        "B/zl1", "B/zl6", "B/zl9", "B/F",
+    );
+    println!("{}", "-".repeat(124));
 
     for (name, data) in &inputs {
         let raw_len = data.len();
 
-        let t = Instant::now();
         let nupic_fast = deflate_level(data, Level::Fast);
-        let nupic_ms = t.elapsed().as_secs_f64() * 1000.0;
+        let nupic_best = deflate_level(data, Level::Best);
 
         let zl1 = compress_zlib(data, 1);
         let zl6 = compress_zlib(data, 6);
         let zl9 = compress_zlib(data, 9);
 
-        let nupic = nupic_fast.len();
-        let r_zl1 = nupic as f64 / zl1.len() as f64;
-        let r_zl9 = nupic as f64 / zl9.len() as f64;
-        println!("{:<22} {:>10}  {:>10} {:>10} {:>10} {:>10} {:>9.2}× {:>9.2}×",
-                 name, raw_len, nupic, zl1.len(), zl6.len(), zl9.len(),
-                 r_zl1, r_zl9);
-        let _ = nupic_ms; // (timing minor relative to compression ratio)
+        let f = nupic_fast.len();
+        let b = nupic_best.len();
+        let r_z1 = b as f64 / zl1.len() as f64;
+        let r_z6 = b as f64 / zl6.len() as f64;
+        let r_z9 = b as f64 / zl9.len() as f64;
+        let r_bf = b as f64 / f as f64;
+        println!(
+            "{:<22} {:>10}  {:>10} {:>10}  {:>10} {:>10} {:>10}   {:>7.2}× {:>7.2}× {:>7.2}× {:>7.2}×",
+            name, raw_len, f, b, zl1.len(), zl6.len(), zl9.len(), r_z1, r_z6, r_z9, r_bf,
+        );
     }
     Ok(())
 }

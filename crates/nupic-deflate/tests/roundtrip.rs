@@ -174,6 +174,128 @@ fn fast_path_compresses_text() {
     assert_eq!(decoded, data);
 }
 
+// =====================================================================
+// Phase 1.0.2 — Best level (best of stored / static / dynamic per block)
+// =====================================================================
+
+fn best_roundtrip(input: &[u8]) -> Vec<u8> {
+    let encoded = deflate_level(input, Level::Best);
+    let mut decoder = DeflateDecoder::new(encoded.as_slice());
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded).expect("flate2 decode");
+    assert_eq!(decoded, input,
+        "Best-level roundtrip mismatch (input len {}, encoded len {})",
+        input.len(), encoded.len());
+    encoded
+}
+
+#[test]
+fn best_empty_roundtrips() { best_roundtrip(b""); }
+
+#[test]
+fn best_one_byte_roundtrips() { best_roundtrip(b"x"); }
+
+#[test]
+fn best_short_text_roundtrips() {
+    best_roundtrip(b"Dynamic Huffman handles ASCII text fine.");
+}
+
+#[test]
+fn best_repeats_compress_to_at_most_static() {
+    // 10 K identical bytes — both static and dynamic do well; chooser
+    // picks the smaller. Should beat static (phase 1.0.1) thanks to a
+    // tighter literal/length code length on the single repeated byte.
+    let data = vec![0x42u8; 10_000];
+    let fast = deflate_level(&data, Level::Fast);
+    let best = best_roundtrip(&data);
+    assert!(best.len() <= fast.len(),
+        "Best must never lose to Fast (best={}, fast={})", best.len(), fast.len());
+    assert!(best.len() < 60,
+        "Dynamic Huffman should compress 10K repeats below 60 bytes (got {})",
+        best.len());
+}
+
+#[test]
+fn best_falls_back_to_stored_on_random() {
+    // Random data: dynamic/static Huffman both pay overhead with no
+    // match savings. The stored block (raw + 5 byte header + ≤7 align)
+    // is the optimum and chooser must select it.
+    let mut s = 0xC0DEFACEu64;
+    let mut data = Vec::with_capacity(8192);
+    for _ in 0..8192 {
+        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        data.push((s >> 32) as u8);
+    }
+    let best = best_roundtrip(&data);
+    // Stored: 5-byte header + ≤7 align + raw = raw + 6 bytes worst case
+    // (plus the 3-byte block prefix overhead).
+    assert!(best.len() <= data.len() + 10,
+        "Best on random should fall back to stored (got {} for {} bytes)",
+        best.len(), data.len());
+}
+
+#[test]
+fn best_matches_zlib_l6_class_on_text() {
+    // English prose × 20 → ~9 KB. Dynamic Huffman with frequency-tuned
+    // literal codes should land within a few percent of zlib level 6.
+    let phrase = b"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do \
+eiusmod tempor incididunt ut labore et dolore magna aliqua. ";
+    let mut data = Vec::with_capacity(phrase.len() * 20);
+    for _ in 0..20 { data.extend_from_slice(phrase); }
+    let best = best_roundtrip(&data);
+    let ratio = best.len() as f64 / data.len() as f64;
+    assert!(ratio < 0.06,
+        "Best on prose × 20 should compress to < 6% (got {ratio:.4}, {} bytes from {})",
+        best.len(), data.len());
+}
+
+#[test]
+fn best_default_level_is_best() {
+    // `deflate(data)` uses the default Level — which is Level::Best as of
+    // phase 1.0.2. Verify by checking that default output never exceeds
+    // explicit Best output (they should be byte-identical).
+    let data = b"the quick brown fox jumps over the lazy dog";
+    let default_out = deflate(data);
+    let best_out = deflate_level(data, Level::Best);
+    assert_eq!(default_out, best_out,
+        "default level should equal Level::Best");
+}
+
+#[test]
+fn best_block_size_chooser_never_regresses() {
+    // For every type of input we already exercise above, Best must be
+    // ≤ Fast in encoded size. (Fast = static Huffman; chooser includes
+    // static so Best is mathematically ≤.)
+    let inputs: Vec<Vec<u8>> = vec![
+        b"".to_vec(),
+        b"x".to_vec(),
+        b"abc".to_vec(),
+        vec![0x42u8; 5000],
+        {
+            let phrase = b"hello world ";
+            let mut buf = Vec::new();
+            for _ in 0..100 { buf.extend_from_slice(phrase); }
+            buf
+        },
+        {
+            let mut s = 0xBEEF_BABEu64;
+            let mut d = Vec::with_capacity(4096);
+            for _ in 0..4096 {
+                s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                d.push((s >> 32) as u8);
+            }
+            d
+        },
+    ];
+    for input in &inputs {
+        let f = deflate_level(input, Level::Fast).len();
+        let b = deflate_level(input, Level::Best).len();
+        assert!(b <= f,
+            "Best regressed vs Fast on len-{} input: best={}, fast={}",
+            input.len(), b, f);
+    }
+}
+
 #[test]
 fn fast_path_handles_random_without_panic() {
     // Random data: LZ77 finds few/no matches; output is ~1.05× raw

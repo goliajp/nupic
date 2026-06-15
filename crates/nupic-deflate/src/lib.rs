@@ -3,16 +3,20 @@
 //!
 //! Stage 1 of the [PNG codec roadmap](../../docs/roadmap.md);see the
 //! `docs/research/png/06-nupic-deflate-design.md` essay for the phase
-//! plan. Currently phase 1.0:
+//! plan. Currently phase 1.0.2:
 //!
-//! - **Stored blocks**(BTYPE=00)— infrastructure only, no compression.
-//!   Output is `~1.0005 ×` the raw input(per-block 5-byte header).
-//! - LZ77 + static Huffman(phase 1.0.1)— planned follow-up
-//!   sub-essay 06-bis-ter
+//! - **Stored blocks**(BTYPE=00)— infrastructure, no compression.
+//!   Output is `~1.0005 ×` raw(per-block 5-byte header). Phase 1.0.0.
+//! - **Greedy LZ77 + static Huffman**(BTYPE=01)— `zlib level 1`
+//!   class on text / repeats. Phase 1.0.1.
+//! - **Dynamic Huffman per block**(BTYPE=10)— frequency-tuned
+//!   canonical Huffman tree (length-limited 15) per block, RFC 1951
+//!   §3.2.7 header. Closes the gap to `zlib level 6/9` on text.
+//!   Phase 1.0.2 (current default — encoder picks the smallest of
+//!   stored / static / dynamic per call).
 //!
-//! Public surface targets the eventual full encoder; today only
-//! [`deflate`] and [`zlib_compress`] are productive. Round-trips through
-//! `flate2` / `miniz_oxide` / `zlib` are validated in the test suite.
+//! Round-trips through `flate2` / `miniz_oxide` / `zlib` are validated
+//! in the test suite.
 //!
 //! # Examples
 //!
@@ -26,8 +30,9 @@
 
 #![allow(clippy::inline_always)]
 
-mod tables;
+mod huffman;
 mod lz77;
+mod tables;
 
 use nupic_bits::{BitWriter, adler32_update};
 
@@ -40,15 +45,19 @@ pub enum Level {
     /// Stored blocks only — no compression, but valid DEFLATE. Output
     /// is `~ 1.0005 × len(data)`. Phase 1.0.0.
     Stored,
-    /// Greedy LZ77 + static Huffman, single block. Phase 1.0.1.
-    /// Output is ~`zlib level 1` class on plain text;same as
-    /// [`Level::Stored`] on incompressible random data(falls back to
-    /// stored automatically per block size heuristic).
-    #[default]
+    /// Greedy LZ77 + **static** Huffman, single block. Phase 1.0.1.
+    /// Output is `~ zlib level 1` class on text;same as
+    /// [`Level::Stored`] on incompressible random data.
     Fast,
+    /// Greedy LZ77 + **best of {stored, static Huffman, dynamic
+    /// Huffman}** per call. Phase 1.0.2 default. Closes the gap to
+    /// `zlib level 6/9` on compressible inputs without ever doing worse
+    /// than [`Level::Fast`] or [`Level::Stored`].
+    #[default]
+    Best,
 }
 
-/// One-shot encode at the default level(currently [`Level::Fast`]).
+/// One-shot encode at the default level(currently [`Level::Best`]).
 #[must_use]
 pub fn deflate(data: &[u8]) -> Vec<u8> {
     deflate_level(data, Level::default())
@@ -59,7 +68,8 @@ pub fn deflate(data: &[u8]) -> Vec<u8> {
 pub fn deflate_level(data: &[u8], level: Level) -> Vec<u8> {
     match level {
         Level::Stored => deflate_stored(data),
-        Level::Fast => lz77::deflate_fast(data),
+        Level::Fast => lz77::deflate_static(data),
+        Level::Best => lz77::deflate_best(data),
     }
 }
 
@@ -90,11 +100,6 @@ pub fn deflate_stored(data: &[u8]) -> Vec<u8> {
         w.write_bits((u32::from(nlen) >> 8) & 0xff, 8);
         // Raw bytes
         if chunk_len > 0 {
-            // BitWriter is byte-aligned now — push directly.
-            let bytes_so_far = w.bit_len() / 8;
-            let _ = bytes_so_far; // (silence: used only as a sanity check below)
-            // Append via repeated 8-bit writes (BitWriter doesn't expose a
-            // direct slice extension; phase 1.1 will add one).
             for &b in &data[written..written + chunk_len] {
                 w.write_bits(u32::from(b), 8);
             }
@@ -114,15 +119,8 @@ pub fn deflate_stored(data: &[u8]) -> Vec<u8> {
 pub fn zlib_compress(data: &[u8]) -> Vec<u8> {
     // CMF = CM=8 (DEFLATE) + CINFO=7 (32 KiB window) = 0x78
     const CMF: u8 = 0x78;
-    // FLG = (FCHECK | FDICT=0 | FLEVEL=0 (fastest))
-    //   FCHECK chosen so (CMF*256 + FLG) % 31 == 0.
-    // (0x78 * 256 + FLG) % 31 == 0  →  FLG = (31 - (0x78 * 256) % 31) % 31
-    //   0x78 * 256 = 30720; 30720 % 31 = 12; FLG = 19 = 0x13
-    // The "FLEVEL=0" choice is the convention for "fastest". flate2's
-    // miniz_oxide accepts any valid FLG.
-    const FLG: u8 = 0x01; // FLEVEL=0, no dict, FCHECK adjusted
+    const FLG: u8 = 0x01; // FLEVEL=0, no dict, FCHECK adjusted below
 
-    // Recompute FCHECK lazily to be robust if we change FLEVEL later.
     let cmf = CMF as u16;
     let mut flg = FLG as u16;
     let header = cmf * 256 + flg;
