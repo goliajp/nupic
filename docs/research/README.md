@@ -36,7 +36,8 @@ crates/nupic-research/   ─ experiments backing the essays
 ## Current essays
 
 - [`png/00-attack-surface.md`](png/00-attack-surface.md) — anchor 篇
-- [`png/01-pluto-case.md`](png/01-pluto-case.md) — 02-pluto 上 imagequant 的 algorithmic ceiling;cement-layer adaptive q_target spec(实测 sweep 推外延总体 0.66× TinyPNG)
+- [`png/01-pluto-case.md`](png/01-pluto-case.md) — 02-pluto 上 imagequant 的 algorithmic ceiling;cement-layer adaptive q_target spec(基于 DSSIM,已被 02 supersede)
+- [`png/02-perceptual-metrics.md`](png/02-perceptual-metrics.md) — 用 SSIMULACRA2 替代肉眼判断;7 图 metric 对照得 nupic 0.4 在 SSIMULACRA2 上 5/7 胜 TinyPNG;给出 metric-grounded 0.4.1 cement-fix spec(总体 0.95× TinyPNG,质量不退化)
 
 ## Companion crate
 

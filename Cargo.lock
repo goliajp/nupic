@@ -137,6 +137,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "av-data"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fca67ba5d317924c02180c576157afd54babe48a76ebc66ce6d34bb8ba08308e"
+dependencies = [
+ "byte-slice-cast",
+ "bytes",
+ "num-derive",
+ "num-rational",
+ "num-traits",
+]
+
+[[package]]
 name = "av-scenechange"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -237,6 +250,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
+name = "byte-slice-cast"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7575182f7272186991736b70173b0ea045398f984bf5ebbb3804736ce1330c9d"
+
+[[package]]
 name = "bytemuck"
 version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -247,6 +266,12 @@ name = "byteorder-lite"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
+
+[[package]]
+name = "bytes"
+version = "1.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "cc"
@@ -1043,6 +1068,7 @@ dependencies = [
  "oxipng",
  "png",
  "rgb",
+ "ssimulacra2",
 ]
 
 [[package]]
@@ -1488,6 +1514,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
+name = "ssimulacra2"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "700cb4e17f98c3f36756815b18dbec2b2e3c4f5028e9cdee3e23dd8c285e736c"
+dependencies = [
+ "num-traits",
+ "rayon",
+ "thiserror 2.0.18",
+ "yuvxyb",
+ "yuvxyb-math",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1794,6 +1833,25 @@ name = "y4m"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a5a4b21e1a62b67a2970e6831bc091d7b87e119e7f9791aef9702e3bef04448"
+
+[[package]]
+name = "yuvxyb"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b06d0d0f23a00eadd02381cf0c84472295bbcd3e7e21ffd2225300c83d557867"
+dependencies = [
+ "av-data",
+ "log",
+ "num-traits",
+ "v_frame",
+ "yuvxyb-math",
+]
+
+[[package]]
+name = "yuvxyb-math"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "453f24cf9e21be2148954a438c72fb999da42b1d128105bfd73ce91e1c6c7d33"
 
 [[package]]
 name = "zerocopy"

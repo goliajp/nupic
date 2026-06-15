@@ -20,3 +20,4 @@ oxipng = { workspace = true }
 image = { workspace = true, features = ["png"] }
 rgb = { workspace = true }
 anyhow = { workspace = true }
+ssimulacra2 = { workspace = true }
