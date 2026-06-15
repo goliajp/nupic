@@ -25,6 +25,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "adler32"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aae1277d39aeec15cb388266ecc24b11c80469deae6067e17a1a7aa9e5c1f234"
+
+[[package]]
 name = "aligned"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1032,8 +1038,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nupic-bits"
+version = "0.5.2"
+dependencies = [
+ "adler32",
+ "crc32fast",
+]
+
+[[package]]
 name = "nupic-cli"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1046,7 +1060,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-color"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "fast-srgb8",
  "image",
@@ -1056,7 +1070,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-core"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "ab_glyph",
  "clap",
@@ -1077,7 +1091,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-quantize"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "image",
  "imagequant",
@@ -1091,12 +1105,15 @@ dependencies = [
 
 [[package]]
 name = "nupic-research"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
+ "adler32",
  "anyhow",
+ "crc32fast",
  "fast-srgb8",
  "image",
  "imagequant",
+ "nupic-bits",
  "nupic-color",
  "nupic-core",
  "nupic-quantize",
@@ -1113,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-ssimulacra"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "image",
  "rayon",

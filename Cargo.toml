@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/nupic-bits",
     "crates/nupic-cli",
     "crates/nupic-color",
     "crates/nupic-core",
@@ -9,8 +10,14 @@ members = [
     "crates/nupic-ssimulacra",
 ]
 
+[workspace.dependencies.crc32fast]
+version = "1"
+
+[workspace.dependencies.adler32]
+version = "1"
+
 [workspace.package]
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"

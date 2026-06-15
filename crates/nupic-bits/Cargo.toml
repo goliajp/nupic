@@ -1,0 +1,15 @@
+[package]
+name = "nupic-bits"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Stage-0 stone for the self-built PNG / DEFLATE codec: CRC-32 (IEEE 802.3 polynomial), Adler-32, and LSB-first bit I/O. 0 runtime dependencies. Numbers match `zlib` / RFC 1950 / RFC 1952 reference fixtures bit-exact across mac arm/x86 and linux."
+
+# `[dependencies]` intentionally empty — 0 deps invariant.
+
+[dev-dependencies]
+crc32fast = "1"
+adler32 = "1"

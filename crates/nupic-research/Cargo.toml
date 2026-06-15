@@ -17,6 +17,9 @@ nupic-core = { workspace = true }
 nupic-color = { path = "../nupic-color" }
 nupic-ssimulacra = { path = "../nupic-ssimulacra" }
 nupic-quantize = { path = "../nupic-quantize" }
+nupic-bits = { path = "../nupic-bits" }
+crc32fast = { workspace = true }
+adler32 = { workspace = true }
 imagequant = { workspace = true }
 png = { workspace = true }
 oxipng = { workspace = true }
