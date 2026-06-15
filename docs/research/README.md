@@ -51,6 +51,7 @@ crates/nupic-research/   ─ experiments backing the essays
 - [`png/03a-ter-oklab-graduation.md`](png/03a-ter-oklab-graduation.md) — Stone A graduates 进 `crates/nupic-color/`。6 项 graduation criteria 全过(perf 0.66 ms / mem `RECOMMENDED_TILE_PIXELS` + tiled API / cov 9 props + 5 fixture + 32 K oracle assertions / doc cross-link)。Stone B unblocked。
 - [`png/03b-ssimulacra2-design.md`](png/03b-ssimulacra2-design.md) — Stone B 设计 anchor。修正 03 essay 的 OKLab 误判(SSIMULACRA2 用 XYB,跟 Stone A 并联非串联);cement baseline 实测 32 ms / 02-pluto(vs 03 估 100 ms over-conservative);bandwidth ceiling 2.6 ms;graduation target < 10 ms(B3 SIMD)。
 - [`png/03b-bis-ssim-b1.md`](png/03b-bis-ssim-b1.md) — Stone B B1 baseline reimpl。三轮迭代发现 cement 用 Recursive Gaussian(Charalampidis 2016),不是离散 11-tap;reimpl 后 **score bit-exact match cement (diff = 0.0000)**;timing B1 1.3-1.9× cement 因为 single-column vertical scan;B2 = chunked vertical pass。
+- [`png/03b-ter-ssim-b2.md`](png/03b-ter-ssim-b2.md) — Stone B B2 vertical pass chunked。02-pluto 26 ms / **B2 0.85× cement 反超**;04/06 仍 1.1-1.25× cement(待 B3 SIMD);score 仍 bit-exact。perf ladder 加 "memory access" 维度。
 
 ## Companion crate
 

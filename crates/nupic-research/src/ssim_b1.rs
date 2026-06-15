@@ -28,12 +28,43 @@ const C2: f32 = 0.0009;
 /// Compute SSIMULACRA2 score given two sRGB f32 buffers (per pixel).
 /// Inputs must be the same width × height, ≥ 8 × 8.
 ///
-/// Returns score in (-∞, 100] where 100 is identical.
+/// B1 entry point — single-column vertical IIR scan. Slower on big
+/// images; bit-exact match with cement crate v0.5.1.
 pub fn ssimulacra2_score_srgb(
     reference: &[[f32; 3]],
     distorted: &[[f32; 3]],
     width: usize,
     height: usize,
+) -> Result<f64, &'static str> {
+    score_inner(reference, distorted, width, height, VerticalKind::Single)
+}
+
+/// Compute SSIMULACRA2 score with the B2 chunked vertical pass.
+/// Same algorithm as `ssimulacra2_score_srgb`; vertical IIR is run
+/// 128 → 32 → 1 columns at a time (mirrors cement
+/// `vertical_pass_chunked::<128, 32>`) so the strided reads coalesce
+/// into L1-friendly windows.
+pub fn ssimulacra2_score_srgb_chunked(
+    reference: &[[f32; 3]],
+    distorted: &[[f32; 3]],
+    width: usize,
+    height: usize,
+) -> Result<f64, &'static str> {
+    score_inner(reference, distorted, width, height, VerticalKind::Chunked)
+}
+
+#[derive(Copy, Clone)]
+enum VerticalKind {
+    Single,
+    Chunked,
+}
+
+fn score_inner(
+    reference: &[[f32; 3]],
+    distorted: &[[f32; 3]],
+    width: usize,
+    height: usize,
+    vk: VerticalKind,
 ) -> Result<f64, &'static str> {
     if reference.len() != distorted.len() || reference.len() != width * height {
         return Err("dimension mismatch");
@@ -58,7 +89,7 @@ pub fn ssimulacra2_score_srgb(
             cur_w = img1.width();
             cur_h = img1.height();
         }
-        all_scales.push(compute_scale(&img1, &img2, cur_w, cur_h));
+        all_scales.push(compute_scale(&img1, &img2, cur_w, cur_h, vk));
     }
 
     Ok(aggregate_score(&all_scales))
@@ -117,7 +148,13 @@ fn downscale_by_2(in_data: &LinearRgb) -> LinearRgb {
 
 // --- per-scale compute ------------------------------------------------
 
-fn compute_scale(img1: &LinearRgb, img2: &LinearRgb, w: usize, h: usize) -> MsssimScale {
+fn compute_scale(
+    img1: &LinearRgb,
+    img2: &LinearRgb,
+    w: usize,
+    h: usize,
+    vk: VerticalKind,
+) -> MsssimScale {
     let xyb1 = make_positive_xyb_planar(img1);
     let xyb2 = make_positive_xyb_planar(img2);
 
@@ -128,16 +165,16 @@ fn compute_scale(img1: &LinearRgb, img2: &LinearRgb, w: usize, h: usize) -> Msss
     ];
 
     image_multiply(&xyb1, &xyb1, &mut mul_buf);
-    let sigma1_sq = gaussian_blur(&mul_buf, w, h);
+    let sigma1_sq = gaussian_blur(&mul_buf, w, h, vk);
 
     image_multiply(&xyb2, &xyb2, &mut mul_buf);
-    let sigma2_sq = gaussian_blur(&mul_buf, w, h);
+    let sigma2_sq = gaussian_blur(&mul_buf, w, h, vk);
 
     image_multiply(&xyb1, &xyb2, &mut mul_buf);
-    let sigma12 = gaussian_blur(&mul_buf, w, h);
+    let sigma12 = gaussian_blur(&mul_buf, w, h, vk);
 
-    let mu1 = gaussian_blur(&xyb1, w, h);
-    let mu2 = gaussian_blur(&xyb2, w, h);
+    let mu1 = gaussian_blur(&xyb1, w, h, vk);
+    let mu2 = gaussian_blur(&xyb2, w, h, vk);
 
     MsssimScale {
         avg_ssim: ssim_map(w, h, &mu1, &mu2, &sigma1_sq, &sigma2_sq, &sigma12),
@@ -295,15 +332,103 @@ mod consts {
     }
 }
 
-fn gaussian_blur(input: &[Vec<f32>; 3], w: usize, h: usize) -> [Vec<f32>; 3] {
+fn gaussian_blur(input: &[Vec<f32>; 3], w: usize, h: usize, vk: VerticalKind) -> [Vec<f32>; 3] {
     let c = consts::get();
     let mut out = [vec![0f32; w * h], vec![0f32; w * h], vec![0f32; w * h]];
     let mut tmp = vec![0f32; w * h];
     for ch in 0..3 {
         recursive_h(c, &input[ch], &mut tmp, w);
-        recursive_v(c, &tmp, &mut out[ch], w, h);
+        match vk {
+            VerticalKind::Single => recursive_v(c, &tmp, &mut out[ch], w, h),
+            VerticalKind::Chunked => recursive_v_chunked(c, &tmp, &mut out[ch], w, h),
+        }
     }
     out
+}
+
+/// Chunked vertical IIR — process `J=128` then `K=32` then 1 column at
+/// a time. Mirrors cement `vertical_pass_chunked::<J, K>` for L1
+/// locality on tall buffers.
+fn recursive_v_chunked(c: &consts::Consts, src: &[f32], dst: &mut [f32], width: usize, height: usize) {
+    let mut x = 0usize;
+    while x + 128 <= width {
+        recursive_v_cols::<128>(c, &src[x..], &mut dst[x..], width, height);
+        x += 128;
+    }
+    while x + 32 <= width {
+        recursive_v_cols::<32>(c, &src[x..], &mut dst[x..], width, height);
+        x += 32;
+    }
+    while x < width {
+        recursive_v_cols::<1>(c, &src[x..], &mut dst[x..], width, height);
+        x += 1;
+    }
+}
+
+/// Vertical IIR over `COLUMNS` columns at once. State vectors are
+/// `3 × COLUMNS × f32`. Reads each row contiguously across the
+/// `COLUMNS` columns, then advances down — strided reads coalesce.
+fn recursive_v_cols<const COLUMNS: usize>(
+    c: &consts::Consts,
+    src: &[f32],
+    dst: &mut [f32],
+    width: usize,
+    height: usize,
+) {
+    let big_n = c.radius as isize;
+    let zeros = [0f32; 128];
+    let zeros_view = &zeros[..COLUMNS];
+
+    let mut prev = [0f32; 3 * 128];
+    let mut prev2 = [0f32; 3 * 128];
+    let mut out_state = [0f32; 3 * 128];
+
+    let mut n = -big_n + 1;
+    while n < height as isize {
+        let top = n - big_n - 1;
+        let bot = n + big_n - 1;
+        let top_row = if top >= 0 {
+            &src[top as usize * width..top as usize * width + COLUMNS]
+        } else {
+            zeros_view
+        };
+        let bot_row = if bot < height as isize {
+            &src[bot as usize * width..bot as usize * width + COLUMNS]
+        } else {
+            zeros_view
+        };
+
+        for i in 0..COLUMNS {
+            let sum = top_row[i] + bot_row[i];
+            let i1 = i;
+            let i3 = i1 + COLUMNS;
+            let i5 = i3 + COLUMNS;
+
+            // alternative recurrence form (cement vertical_pass)
+            let o1 = prev[i1].mul_add(c.vert_mul_prev[0], prev2[i1]);
+            let o3 = prev[i3].mul_add(c.vert_mul_prev[1], prev2[i3]);
+            let o5 = prev[i5].mul_add(c.vert_mul_prev[2], prev2[i5]);
+
+            let new_1 = sum.mul_add(c.vert_mul_in[0], -o1);
+            let new_3 = sum.mul_add(c.vert_mul_in[1], -o3);
+            let new_5 = sum.mul_add(c.vert_mul_in[2], -o5);
+
+            out_state[i1] = new_1;
+            out_state[i3] = new_3;
+            out_state[i5] = new_5;
+
+            if n >= 0 {
+                dst[n as usize * width + i] = new_1 + new_3 + new_5;
+            }
+        }
+
+        // shift prev2 ← prev; prev ← out_state
+        let pole_span = 3 * COLUMNS;
+        prev2[..pole_span].copy_from_slice(&prev[..pole_span]);
+        prev[..pole_span].copy_from_slice(&out_state[..pole_span]);
+
+        n += 1;
+    }
 }
 
 /// Horizontal IIR pass — single-row scan, three poles run in lockstep,
