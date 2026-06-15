@@ -49,6 +49,7 @@ crates/nupic-research/   ─ experiments backing the essays
 - [`png/03a-oklab-design.md`](png/03a-oklab-design.md) — Stone A 详细设计 + 实测;naive scalar 8.18 ms / 02-pluto 精准命中 03 估计;oklab crate (LUT) 1.88 ms;距离 bandwidth ceiling 0.06 ms 还有 31×;给 stone A0→A4 attack plan。
 - [`png/03a-bis-oklab-simd.md`](png/03a-bis-oklab-simd.md) — Stone A perf 推进:LUT + Halley cbrt 2.53 ms;`wide` portable SIMD 翻车;A3a FMA + Lagny scalar 0.66 ms / 02-pluto(穿过 graduation 阈值 < 1 ms)。
 - [`png/03a-ter-oklab-graduation.md`](png/03a-ter-oklab-graduation.md) — Stone A graduates 进 `crates/nupic-color/`。6 项 graduation criteria 全过(perf 0.66 ms / mem `RECOMMENDED_TILE_PIXELS` + tiled API / cov 9 props + 5 fixture + 32 K oracle assertions / doc cross-link)。Stone B unblocked。
+- [`png/03b-ssimulacra2-design.md`](png/03b-ssimulacra2-design.md) — Stone B 设计 anchor。修正 03 essay 的 OKLab 误判(SSIMULACRA2 用 XYB,跟 Stone A 并联非串联);cement baseline 实测 32 ms / 02-pluto(vs 03 估 100 ms over-conservative);bandwidth ceiling 2.6 ms;graduation target < 10 ms(B3 SIMD)。
 
 ## Companion crate
 
