@@ -53,10 +53,216 @@ pub fn ssimulacra2_score_srgb_chunked(
     score_inner(reference, distorted, width, height, VerticalKind::Chunked)
 }
 
+/// Compute SSIMULACRA2 score with the B4 parallel horizontal pass.
+/// Chunked vertical + rayon-parallel horizontal IIR over rows. Matches
+/// cement's `feature = "rayon"` default path (which is what
+/// `ssimulacra2 = "0.5"` activates in this workspace).
+pub fn ssimulacra2_score_srgb_parallel(
+    reference: &[[f32; 3]],
+    distorted: &[[f32; 3]],
+    width: usize,
+    height: usize,
+) -> Result<f64, &'static str> {
+    score_inner(reference, distorted, width, height, VerticalKind::ParallelH)
+}
+
+/// Compute SSIMULACRA2 score with the B3 reused-scratch path.
+/// Chunked vertical pass + a `Scratch` struct holding `mul_buf`,
+/// `blur_temp`, and the 5 per-scale Gaussian outputs. Scales reuse
+/// the allocation via `truncate` (mirrors cement `Blur::shrink_to`),
+/// eliminating the 30-buffer-per-call malloc/zero-fill churn that B2
+/// pays.
+pub fn ssimulacra2_score_srgb_reuse(
+    reference: &[[f32; 3]],
+    distorted: &[[f32; 3]],
+    width: usize,
+    height: usize,
+) -> Result<f64, &'static str> {
+    if reference.len() != distorted.len() || reference.len() != width * height {
+        return Err("dimension mismatch");
+    }
+    if width < 8 || height < 8 {
+        return Err("image too small");
+    }
+    let mut img1 = build_linear(reference, width, height)?;
+    let mut img2 = build_linear(distorted, width, height)?;
+
+    let n0 = width * height;
+    let mut scratch = Scratch::new(n0);
+    let mut all_scales: Vec<MsssimScale> = Vec::with_capacity(NUM_SCALES);
+    let mut cur_w = width;
+    let mut cur_h = height;
+
+    for scale in 0..NUM_SCALES {
+        if cur_w < 8 || cur_h < 8 {
+            break;
+        }
+        if scale > 0 {
+            img1 = downscale_by_2(&img1);
+            img2 = downscale_by_2(&img2);
+            cur_w = img1.width();
+            cur_h = img1.height();
+            scratch.shrink_to(cur_w * cur_h);
+        }
+        all_scales.push(compute_scale_reuse(&img1, &img2, cur_w, cur_h, &mut scratch));
+    }
+    Ok(aggregate_score(&all_scales))
+}
+
+/// Per-image scratch space reused across pyramid scales.
+struct Scratch {
+    blur_temp: Vec<f32>,
+    blur_out_a: Vec<f32>,
+    blur_out_b: Vec<f32>,
+    blur_out_c: Vec<f32>,
+    mul_buf_a: Vec<f32>,
+    mul_buf_b: Vec<f32>,
+    mul_buf_c: Vec<f32>,
+    xyb1_a: Vec<f32>,
+    xyb1_b: Vec<f32>,
+    xyb1_c: Vec<f32>,
+    xyb2_a: Vec<f32>,
+    xyb2_b: Vec<f32>,
+    xyb2_c: Vec<f32>,
+}
+
+impl Scratch {
+    fn new(n: usize) -> Self {
+        Self {
+            blur_temp: vec![0f32; n],
+            blur_out_a: vec![0f32; n],
+            blur_out_b: vec![0f32; n],
+            blur_out_c: vec![0f32; n],
+            mul_buf_a: vec![0f32; n],
+            mul_buf_b: vec![0f32; n],
+            mul_buf_c: vec![0f32; n],
+            xyb1_a: vec![0f32; n],
+            xyb1_b: vec![0f32; n],
+            xyb1_c: vec![0f32; n],
+            xyb2_a: vec![0f32; n],
+            xyb2_b: vec![0f32; n],
+            xyb2_c: vec![0f32; n],
+        }
+    }
+    fn shrink_to(&mut self, n: usize) {
+        self.blur_temp.truncate(n);
+        self.blur_out_a.truncate(n);
+        self.blur_out_b.truncate(n);
+        self.blur_out_c.truncate(n);
+        self.mul_buf_a.truncate(n);
+        self.mul_buf_b.truncate(n);
+        self.mul_buf_c.truncate(n);
+        self.xyb1_a.truncate(n);
+        self.xyb1_b.truncate(n);
+        self.xyb1_c.truncate(n);
+        self.xyb2_a.truncate(n);
+        self.xyb2_b.truncate(n);
+        self.xyb2_c.truncate(n);
+    }
+}
+
+fn compute_scale_reuse(
+    img1: &LinearRgb,
+    img2: &LinearRgb,
+    w: usize,
+    h: usize,
+    s: &mut Scratch,
+) -> MsssimScale {
+    // populate xyb planes in-place into scratch.
+    fill_positive_xyb_planar(img1, &mut s.xyb1_a, &mut s.xyb1_b, &mut s.xyb1_c);
+    fill_positive_xyb_planar(img2, &mut s.xyb2_a, &mut s.xyb2_b, &mut s.xyb2_c);
+
+    let xyb1: [Vec<f32>; 3] = [
+        std::mem::take(&mut s.xyb1_a),
+        std::mem::take(&mut s.xyb1_b),
+        std::mem::take(&mut s.xyb1_c),
+    ];
+    let xyb2: [Vec<f32>; 3] = [
+        std::mem::take(&mut s.xyb2_a),
+        std::mem::take(&mut s.xyb2_b),
+        std::mem::take(&mut s.xyb2_c),
+    ];
+    let mut mul_buf: [Vec<f32>; 3] = [
+        std::mem::take(&mut s.mul_buf_a),
+        std::mem::take(&mut s.mul_buf_b),
+        std::mem::take(&mut s.mul_buf_c),
+    ];
+
+    let consts = consts::get();
+
+    image_multiply(&xyb1, &xyb1, &mut mul_buf);
+    let sigma1_sq = gaussian_blur_reuse(consts, &mul_buf, &mut s.blur_temp, w, h);
+
+    image_multiply(&xyb2, &xyb2, &mut mul_buf);
+    let sigma2_sq = gaussian_blur_reuse(consts, &mul_buf, &mut s.blur_temp, w, h);
+
+    image_multiply(&xyb1, &xyb2, &mut mul_buf);
+    let sigma12 = gaussian_blur_reuse(consts, &mul_buf, &mut s.blur_temp, w, h);
+
+    let mu1 = gaussian_blur_reuse(consts, &xyb1, &mut s.blur_temp, w, h);
+    let mu2 = gaussian_blur_reuse(consts, &xyb2, &mut s.blur_temp, w, h);
+
+    let out = MsssimScale {
+        avg_ssim: ssim_map(w, h, &mu1, &mu2, &sigma1_sq, &sigma2_sq, &sigma12),
+        avg_edgediff: edge_diff_map(w, h, &xyb1, &mu1, &xyb2, &mu2),
+    };
+
+    // return xyb / mul_buf buffers to scratch (so next scale can reuse)
+    let [x1a, x1b, x1c] = xyb1;
+    s.xyb1_a = x1a; s.xyb1_b = x1b; s.xyb1_c = x1c;
+    let [x2a, x2b, x2c] = xyb2;
+    s.xyb2_a = x2a; s.xyb2_b = x2b; s.xyb2_c = x2c;
+    let [ma, mb, mc] = mul_buf;
+    s.mul_buf_a = ma; s.mul_buf_b = mb; s.mul_buf_c = mc;
+
+    out
+}
+
+fn fill_positive_xyb_planar(
+    lin: &LinearRgb,
+    out0: &mut Vec<f32>,
+    out1: &mut Vec<f32>,
+    out2: &mut Vec<f32>,
+) {
+    let xyb = Xyb::from(lin.clone());
+    let n = xyb.width() * xyb.height();
+    out0.clear(); out0.reserve(n);
+    out1.clear(); out1.reserve(n);
+    out2.clear(); out2.reserve(n);
+    for p in xyb.data().iter() {
+        out0.push(p[0].mul_add(14.0, 0.42));
+        out1.push(p[1] + 0.01);
+        out2.push((p[2] - p[1]) + 0.55);
+    }
+}
+
+fn gaussian_blur_reuse(
+    c: &consts::Consts,
+    input: &[Vec<f32>; 3],
+    tmp: &mut Vec<f32>,
+    w: usize,
+    h: usize,
+) -> [Vec<f32>; 3] {
+    let n = w * h;
+    let mut out = [vec![0f32; n], vec![0f32; n], vec![0f32; n]];
+    if tmp.len() < n {
+        tmp.resize(n, 0f32);
+    } else {
+        tmp.truncate(n);
+    }
+    for ch in 0..3 {
+        recursive_h(c, &input[ch], tmp, w);
+        recursive_v_chunked(c, tmp, &mut out[ch], w, h);
+    }
+    out
+}
+
 #[derive(Copy, Clone)]
 enum VerticalKind {
     Single,
     Chunked,
+    /// Chunked vertical + rayon-parallel horizontal.
+    ParallelH,
 }
 
 fn score_inner(
@@ -337,13 +543,68 @@ fn gaussian_blur(input: &[Vec<f32>; 3], w: usize, h: usize, vk: VerticalKind) ->
     let mut out = [vec![0f32; w * h], vec![0f32; w * h], vec![0f32; w * h]];
     let mut tmp = vec![0f32; w * h];
     for ch in 0..3 {
-        recursive_h(c, &input[ch], &mut tmp, w);
         match vk {
-            VerticalKind::Single => recursive_v(c, &tmp, &mut out[ch], w, h),
-            VerticalKind::Chunked => recursive_v_chunked(c, &tmp, &mut out[ch], w, h),
+            VerticalKind::Single => {
+                recursive_h(c, &input[ch], &mut tmp, w);
+                recursive_v(c, &tmp, &mut out[ch], w, h);
+            }
+            VerticalKind::Chunked => {
+                recursive_h(c, &input[ch], &mut tmp, w);
+                recursive_v_chunked(c, &tmp, &mut out[ch], w, h);
+            }
+            VerticalKind::ParallelH => {
+                recursive_h_parallel(c, &input[ch], &mut tmp, w);
+                recursive_v_chunked(c, &tmp, &mut out[ch], w, h);
+            }
         }
     }
     out
+}
+
+/// Rayon-parallel horizontal IIR — each row independent, distributed
+/// across rayon thread pool. Mirrors cement's `horizontal_pass` with
+/// `feature = "rayon"`.
+fn recursive_h_parallel(c: &consts::Consts, src: &[f32], dst: &mut [f32], width: usize) {
+    use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+    use rayon::slice::{ParallelSlice, ParallelSliceMut};
+    src.par_chunks_exact(width)
+        .zip(dst.par_chunks_exact_mut(width))
+        .for_each(|(in_row, out_row)| recursive_h_row(c, in_row, out_row, width));
+}
+
+#[inline]
+fn recursive_h_row(c: &consts::Consts, src: &[f32], dst: &mut [f32], width: usize) {
+    let big_n = c.radius as isize;
+    let mut prev_1 = 0f32; let mut prev_3 = 0f32; let mut prev_5 = 0f32;
+    let mut prev2_1 = 0f32; let mut prev2_3 = 0f32; let mut prev2_5 = 0f32;
+
+    let mut n = -big_n + 1;
+    while n < width as isize {
+        let left = n - big_n - 1;
+        let right = n + big_n - 1;
+        let left_v = if left >= 0 { src[left as usize] } else { 0.0 };
+        let right_v = if right < width as isize { src[right as usize] } else { 0.0 };
+        let sum = left_v + right_v;
+
+        let mut o1 = sum * c.mul_in[0];
+        let mut o3 = sum * c.mul_in[1];
+        let mut o5 = sum * c.mul_in[2];
+
+        o1 = c.mul_prev2[0].mul_add(prev2_1, o1);
+        o3 = c.mul_prev2[1].mul_add(prev2_3, o3);
+        o5 = c.mul_prev2[2].mul_add(prev2_5, o5);
+        prev2_1 = prev_1; prev2_3 = prev_3; prev2_5 = prev_5;
+
+        o1 = c.mul_prev[0].mul_add(prev_1, o1);
+        o3 = c.mul_prev[1].mul_add(prev_3, o3);
+        o5 = c.mul_prev[2].mul_add(prev_5, o5);
+        prev_1 = o1; prev_3 = o3; prev_5 = o5;
+
+        if n >= 0 {
+            dst[n as usize] = o1 + o3 + o5;
+        }
+        n += 1;
+    }
 }
 
 /// Chunked vertical IIR — process `J=128` then `K=32` then 1 column at

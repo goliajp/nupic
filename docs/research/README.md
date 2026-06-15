@@ -52,6 +52,7 @@ crates/nupic-research/   ─ experiments backing the essays
 - [`png/03b-ssimulacra2-design.md`](png/03b-ssimulacra2-design.md) — Stone B 设计 anchor。修正 03 essay 的 OKLab 误判(SSIMULACRA2 用 XYB,跟 Stone A 并联非串联);cement baseline 实测 32 ms / 02-pluto(vs 03 估 100 ms over-conservative);bandwidth ceiling 2.6 ms;graduation target < 10 ms(B3 SIMD)。
 - [`png/03b-bis-ssim-b1.md`](png/03b-bis-ssim-b1.md) — Stone B B1 baseline reimpl。三轮迭代发现 cement 用 Recursive Gaussian(Charalampidis 2016),不是离散 11-tap;reimpl 后 **score bit-exact match cement (diff = 0.0000)**;timing B1 1.3-1.9× cement 因为 single-column vertical scan;B2 = chunked vertical pass。
 - [`png/03b-ter-ssim-b2.md`](png/03b-ter-ssim-b2.md) — Stone B B2 vertical pass chunked。02-pluto 26 ms / **B2 0.85× cement 反超**;04/06 仍 1.1-1.25× cement(待 B3 SIMD);score 仍 bit-exact。perf ladder 加 "memory access" 维度。
+- [`png/03b-quater-ssim-b4.md`](png/03b-quater-ssim-b4.md) — Stone B B3/B4。B3 buffer reuse hypothesis 翻车(+4-6% slow on M2);**B4 rayon parallel horizontal 跟 cement ≈ 持平**(02 0.92×, 04 1.01×, 06 1.04×);score 仍 0.0000 diff;graduation 还差 2.8×;新攻击维度 "parallelism ladder" 加进 stone-essay 模板。
 
 ## Companion crate
 

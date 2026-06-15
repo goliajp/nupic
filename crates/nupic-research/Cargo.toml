@@ -25,3 +25,4 @@ oklab = { workspace = true }
 fast-srgb8 = { workspace = true }
 wide = { workspace = true }
 yuvxyb = { workspace = true }
+rayon = { workspace = true }

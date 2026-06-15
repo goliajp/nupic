@@ -1085,6 +1085,7 @@ dependencies = [
  "oklab",
  "oxipng",
  "png",
+ "rayon",
  "rgb",
  "ssimulacra2",
  "wide",

@@ -12,7 +12,12 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use nupic_research::ssim_b1::{ssimulacra2_score_srgb, ssimulacra2_score_srgb_chunked};
+use nupic_research::ssim_b1::{
+    ssimulacra2_score_srgb,
+    ssimulacra2_score_srgb_chunked,
+    ssimulacra2_score_srgb_parallel,
+    ssimulacra2_score_srgb_reuse,
+};
 use ssimulacra2::{ColorPrimaries, Rgb, TransferCharacteristic, compute_frame_ssimulacra2};
 
 const INPUTS: &str = "assets/png-bench/inputs";
@@ -27,13 +32,17 @@ struct Row {
     cement_ms: f64,
     b1_ms: f64,
     b2_ms: f64,
+    b3_ms: f64,
     cement_score: f64,
     b1_score: f64,
     b2_score: f64,
+    b3_score: f64,
     b1_diff: f64,
     b2_diff: f64,
+    b3_diff: f64,
     b1_over_cement: f64,
     b2_over_cement: f64,
+    b3_over_cement: f64,
 }
 
 fn main() -> Result<()> {
@@ -63,7 +72,8 @@ fn main() -> Result<()> {
         let (cm, cs) = time_cement(&srgb_f32, &srgb_f32, w, h, 5);
         let (b1m, b1s) = time_b1(&srgb_f32, &srgb_f32, w, h, 5);
         let (b2m, b2s) = time_b2(&srgb_f32, &srgb_f32, w, h, 5);
-        rows.push(make_row(name, n, "self", cm, b1m, b2m, cs, b1s, b2s));
+        let (b3m, b3s) = time_b3(&srgb_f32, &srgb_f32, w, h, 5);
+        rows.push(make_row(name, n, "self", cm, b1m, b2m, b3m, cs, b1s, b2s, b3s));
 
         // vs tinypng
         let tp = tinypng_dir.join(name);
@@ -79,7 +89,8 @@ fn main() -> Result<()> {
                     let (cm, cs) = time_cement(&srgb_f32, &d_f32, w, h, 5);
                     let (b1m, b1s) = time_b1(&srgb_f32, &d_f32, w, h, 5);
                     let (b2m, b2s) = time_b2(&srgb_f32, &d_f32, w, h, 5);
-                    rows.push(make_row(name, n, "vs-tinypng", cm, b1m, b2m, cs, b1s, b2s));
+                    let (b3m, b3s) = time_b3(&srgb_f32, &d_f32, w, h, 5);
+                    rows.push(make_row(name, n, "vs-tinypng", cm, b1m, b2m, b3m, cs, b1s, b2s, b3s));
                 }
             }
         }
@@ -129,11 +140,40 @@ fn time_b2(r: &[[f32; 3]], d: &[[f32; 3]], w: usize, h: usize, runs: usize) -> (
     (ts[ts.len() / 2], score)
 }
 
+fn time_b3(r: &[[f32; 3]], d: &[[f32; 3]], w: usize, h: usize, runs: usize) -> (f64, f64) {
+    let mut ts = Vec::with_capacity(runs);
+    let mut score = 0.0f64;
+    for _ in 0..runs {
+        let t0 = Instant::now();
+        // B4 path: parallel horizontal pass. Renaming from "B3 reuse"
+        // since the buffer-reuse hypothesis (03b-ter) didn't beat B2;
+        // the real cement advantage was rayon. Keep the column name b3
+        // to avoid bench column shuffle; semantics changed mid-essay.
+        score = ssimulacra2_score_srgb_parallel(r, d, w, h).expect("b4-parallel");
+        ts.push(t0.elapsed().as_secs_f64() * 1000.0);
+    }
+    ts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (ts[ts.len() / 2], score)
+}
+
+#[allow(dead_code)]
+fn time_b3_reuse(r: &[[f32; 3]], d: &[[f32; 3]], w: usize, h: usize, runs: usize) -> (f64, f64) {
+    let mut ts = Vec::with_capacity(runs);
+    let mut score = 0.0f64;
+    for _ in 0..runs {
+        let t0 = Instant::now();
+        score = ssimulacra2_score_srgb_reuse(r, d, w, h).expect("b3-reuse");
+        ts.push(t0.elapsed().as_secs_f64() * 1000.0);
+    }
+    ts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (ts[ts.len() / 2], score)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn make_row(
     name: &str, n: usize, pass: &'static str,
-    cm: f64, b1m: f64, b2m: f64,
-    cs: f64, b1s: f64, b2s: f64,
+    cm: f64, b1m: f64, b2m: f64, b3m: f64,
+    cs: f64, b1s: f64, b2s: f64, b3s: f64,
 ) -> Row {
     Row {
         image: name.to_string(),
@@ -142,25 +182,30 @@ fn make_row(
         cement_ms: cm,
         b1_ms: b1m,
         b2_ms: b2m,
+        b3_ms: b3m,
         cement_score: cs,
         b1_score: b1s,
         b2_score: b2s,
+        b3_score: b3s,
         b1_diff: (cs - b1s).abs(),
         b2_diff: (cs - b2s).abs(),
+        b3_diff: (cs - b3s).abs(),
         b1_over_cement: b1m / cm,
         b2_over_cement: b2m / cm,
+        b3_over_cement: b3m / cm,
     }
 }
 
 fn write_csv(path: &Path, rows: &[Row]) -> Result<()> {
     use std::io::Write;
     let mut f = fs::File::create(path)?;
-    writeln!(f, "image,n_pixels,pass,cement_ms,b1_ms,b2_ms,cement_score,b1_score,b2_score,b1_diff,b2_diff,b1_over_cement,b2_over_cement")?;
+    writeln!(f, "image,n_pixels,pass,cement_ms,b1_ms,b2_ms,b3_ms,cement_score,b1_score,b2_score,b3_score,b1_diff,b2_diff,b3_diff,b1_over_cement,b2_over_cement,b3_over_cement")?;
     for r in rows {
-        writeln!(f, "{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.4},{:.4},{:.2},{:.2}",
-            r.image, r.n_pixels, r.pass, r.cement_ms, r.b1_ms, r.b2_ms,
-            r.cement_score, r.b1_score, r.b2_score,
-            r.b1_diff, r.b2_diff, r.b1_over_cement, r.b2_over_cement)?;
+        writeln!(f, "{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.4},{:.4},{:.4},{:.2},{:.2},{:.2}",
+            r.image, r.n_pixels, r.pass, r.cement_ms, r.b1_ms, r.b2_ms, r.b3_ms,
+            r.cement_score, r.b1_score, r.b2_score, r.b3_score,
+            r.b1_diff, r.b2_diff, r.b3_diff,
+            r.b1_over_cement, r.b2_over_cement, r.b3_over_cement)?;
     }
     Ok(())
 }
@@ -168,17 +213,16 @@ fn write_csv(path: &Path, rows: &[Row]) -> Result<()> {
 fn write_md(path: &Path, rows: &[Row]) -> Result<()> {
     use std::fmt::Write;
     let mut s = String::new();
-    writeln!(&mut s, "# 03b-bis-ssim-b1-bench — B1 vs B2 vs cement\n")?;
+    writeln!(&mut s, "# 03b-bis-ssim-b1-bench — B1 vs B2 vs B3 vs cement\n")?;
     writeln!(&mut s, "Generated by `cargo run --release -p nupic-research --example ssim_b1_bench`.\n")?;
-    writeln!(&mut s, "| image | pass | cement_ms | B1_ms | B2_ms | B1/cement | B2/cement | B1_diff | B2_diff |")?;
-    writeln!(&mut s, "|---|---|---:|---:|---:|---:|---:|---:|---:|")?;
+    writeln!(&mut s, "| image | pass | cement_ms | B1_ms | B2_ms | B3_ms | B3/cement | B3_diff |")?;
+    writeln!(&mut s, "|---|---|---:|---:|---:|---:|---:|---:|")?;
     for r in rows {
         writeln!(&mut s,
-            "| `{}` | {} | {:.3} | {:.3} | {:.3} | {:.2}× | {:.2}× | {:.4} | {:.4} |",
+            "| `{}` | {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.2}× | {:.4} |",
             r.image, r.pass,
-            r.cement_ms, r.b1_ms, r.b2_ms,
-            r.b1_over_cement, r.b2_over_cement,
-            r.b1_diff, r.b2_diff)?;
+            r.cement_ms, r.b1_ms, r.b2_ms, r.b3_ms,
+            r.b3_over_cement, r.b3_diff)?;
     }
     fs::write(path, s)?;
     Ok(())
