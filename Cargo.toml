@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/nupic-cli",
     "crates/nupic-core",
+    "crates/nupic-research",
 ]
 
 [workspace.package]

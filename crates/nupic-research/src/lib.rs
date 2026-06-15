@@ -1,0 +1,11 @@
+//! Research crate — experiments backing `docs/research/`.
+//!
+//! Each binary here is paired with an essay. Add new experiments as
+//! `examples/<topic>_<n>_<slug>.rs` (or `src/bin/...` if they need to
+//! share helpers via this lib). Keep numbers measurable, write the
+//! essay alongside, and graduate the code into `nupic-core` or a
+//! dedicated stone crate (`nupic-bits`, `nupic-deflate`, ...) when an
+//! approach becomes load-bearing.
+//!
+//! This file is intentionally empty; helpers land here only when they
+//! are reused across experiments.

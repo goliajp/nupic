@@ -1,0 +1,16 @@
+[package]
+name = "nupic-research"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Research-grade experiments backing docs/research/. Not part of the public API surface — each binary here is paired with an essay under docs/research/ and is allowed to depend on whatever it needs to make a measurement. Successful experiments graduate into nupic-core or a dedicated stone crate."
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+nupic-core = { workspace = true }
