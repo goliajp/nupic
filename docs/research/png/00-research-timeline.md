@@ -61,6 +61,17 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 6 — default-flip final push(0.5.23-)
+- 0.5.23 Pass 1-4 default-flip gap decomposition + Level::Best always:
+  testflight 47KB→25KB(-46%),vantage 407KB→314KB(-23%);wall-clock 1s→34s
+  on UI(size-vs-time trade-off accepted for research-density ship)→ [03k](03k-default-flip-gap.md)
+  - Pass 1:misread gap decomposition(`default_flip_gap.rs`)
+  - Pass 2:filter pick analysis(`filter_pick_diag.rs`)— BestOf picks
+    None on all 7 fixture,proxy mispredict cost = 0
+  - Pass 3:cleaner ratio bench(`iter_passes_sweep.rs`)— real
+    deflate-quality gap only 1.5-6.5%
+  - Pass 4:remove size-aware Fast fallback,ship pure Best
+
 ### Cycle 5 — research density(0.5.19-0.5.22)
 - 0.5.19 Pareto sweep + **tiered `--dither auto`**(photo 0.5 / UI 0.25 by mean-run-length signal)→ [03f](03f-pareto-tiered-dither.md)
   - 04-portrait +1.03,05-mountain +5.08,UI +0.11~0.18,logos 0 — perfect

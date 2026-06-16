@@ -58,7 +58,7 @@ fn zlib_wrap(data: &[u8], level: Level) -> Vec<u8> {
 
 mod filter;
 
-pub use filter::FilterType;
+pub use filter::{FilterType, filter_image, filter_image_single, filter_image_deflate_aware, filter_image_best_of, mean_run_length};
 
 /// PNG filter-selection strategy.
 ///
@@ -150,22 +150,14 @@ pub fn encode_indexed_png_with(img: &IndexedImage, strategy: FilterStrategy) -> 
         }
         FilterStrategy::BestOf => filter::filter_image_best_of(img.width, img.height, &img.indices),
     };
-    // Phase 2.4: adaptive Level selection driven by (mrl × input-size)
-    // product. NICE_MATCH=128 in nupic-deflate (Pass 6) cuts the worst
-    // chain-walk pathology but Level::Best is still O(N × chain × iter)
-    // = ~10s/MB on flat-run input. Use Fast on (large AND moderately-
-    // flat) input — vantage 4.5MP mrl=11 → 54s Best vs 5s Fast for
-    // 29% size cost. Small inputs always Best (sub-10s regardless of
-    // mrl); pure-photo inputs (mrl < 4) always Best (no flat runs).
-    let mrl = filter::mean_run_length(&raw_filtered);
-    let big_and_flat = raw_filtered.len() > 500_000 && mrl >= 8.0;
-    let very_flat = mrl >= 32.0;
-    let level = if big_and_flat || very_flat {
-        Level::Fast
-    } else {
-        Level::Best
-    };
-    let idat = zlib_wrap(&raw_filtered, level);
+    // Cycle 6 Pass 4: removed size-aware Fast fallback (was 2.4 ship).
+    // Gap decomposition (`docs/research/png/03k-default-flip-gap.md`)
+    // showed nupic-deflate Best vs libdeflate is only 1.5-6.5% larger
+    // on Path A's filtered rows (not 18% as initial confused decomp
+    // suggested), so the Fast-fallback size cost (+30% on vantage,
+    // +47% on testflight) wasn't worth the wall-clock savings — keep
+    // Level::Best always, rely on NICE_MATCH=128 to bound chain walks.
+    let idat = zlib_wrap(&raw_filtered, Level::Best);
     write_chunk(&mut out, b"IDAT", &idat);
 
     // IEND — empty payload
