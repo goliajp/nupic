@@ -19,7 +19,7 @@ version = "1"
 version = "1"
 
 [workspace.package]
-version = "0.5.34"
+version = "0.5.35"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/goliajp/nupic"
@@ -32,7 +32,7 @@ thiserror = "2"
 clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = "4"
 image = { version = "0.25", default-features = false }
-oxipng = { version = "9", default-features = false, features = ["parallel"] }
+oxipng = { version = "9", default-features = false, features = ["parallel", "zopfli"] }
 ravif = { version = "0.11", default-features = false, features = ["threading"] }
 rgb = "0.8"
 fast_image_resize = { version = "5", default-features = false, features = ["image", "rayon"] }

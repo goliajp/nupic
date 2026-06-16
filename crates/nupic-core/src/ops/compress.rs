@@ -201,7 +201,11 @@ fn encode_png_stone_c(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     let raw = rgba.into_raw();
     let qopts = nupic_quantize::QuantizeOpts {
         n_colors: 256,
-        oxipng_preset: u8::min(opts.effort, 6),
+        // Cycle 21: pass full effort 0-10 through (was capped at 6).
+        // quantize_indexed_png internally caps libdeflate preset at 6,
+        // and treats effort ≥ 7 as opt-in Zopfli deflater (slower,
+        // -0.3% corpus size, 0 SSIM regression).
+        oxipng_preset: opts.effort.min(10),
         strip_metadata: opts.strip_metadata,
         dither_strength: opts.dither_strength,
     };

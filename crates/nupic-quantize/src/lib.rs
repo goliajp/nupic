@@ -119,6 +119,18 @@ pub fn quantize_indexed_png(
     if opts.strip_metadata {
         oxipng_opts.strip = oxipng::StripChunks::Safe;
     }
+    // Phase 3.5 (Cycle 21): effort ≥ 7 unlocks Zopfli deflater for
+    // -0.3% corpus size at 2.7× wall time. iterations = (effort-6) × 5,
+    // capped at 30: effort=7 → 5, effort=8 → 10, effort=9 → 15,
+    // effort=10 → 20. Pre-Phase-3.5 effort > 6 had no effect (preset
+    // capped at 6, libdeflate). Cycle 21 essay documents the corpus
+    // sweep showing zero SSIM regression on all 7 fixtures.
+    if opts.oxipng_preset >= 7 {
+        let iters = ((opts.oxipng_preset - 6) as u8 * 5).min(30).max(1);
+        oxipng_opts.deflate = oxipng::Deflaters::Zopfli {
+            iterations: std::num::NonZeroU8::new(iters).unwrap(),
+        };
+    }
     oxipng::optimize_from_memory(&raw, &oxipng_opts)
         .map_err(|e| QuantizeError::Oxipng(format!("{e:?}")))
 }

@@ -61,6 +61,18 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 21 — `--effort 7-10` unlocks oxipng Zopfli deflater(v0.5.35,ship)
+- Probe(`cycle21_zopfli_probe`):full corpus Libdeflater vs Zopfli iter=15
+- Zopfli **每 fixture -23~-2496 B**,total **-8714 B(-0.32%)**;
+  **零 SSIM regression**(deflate 是 lossless 变量)
+- Wall time 2.7× 慢
+- Wire:`--effort 7-10` → Zopfli iter=(effort-6)×5,backward compatible
+  (default `--effort 5` 不变);Cargo workspace 启用 oxipng "zopfli" feature
+- vs TinyPNG:e5 -8.8%,e10 **-9.1%** corpus 小
+- 7 fixture e10 vs e5 SSIM **完全不变**,size -509 ~ -1906 B 每 fixture
+- 219 tests 全绿
+- Essay:`03r-cycle21-zopfli-effort.md`
+
 ### Cycle 20 — tier-2 dither 0.25 → 0.35 Pareto bump(v0.5.34,ship)
 - 02-pluto-transparent dither sweep:d=0.25 给 SSIM 80.44,d=0.35 给
   80.73(+0.29 SSIM / +1.7 KB),d=0.50 给 80.87(peak,但 +4 KB)
