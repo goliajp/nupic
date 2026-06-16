@@ -90,7 +90,7 @@ pub fn quantize_indexed_png(
     // Resolve dither strength: NaN means "auto-classify"; finite > 0
     // means explicit; else no dither.
     let resolved_strength = if opts.dither_strength.is_nan() {
-        classify_for_auto_dither(src_rgba)
+        classify_for_auto_dither(src_rgba, width)
     } else {
         opts.dither_strength
     };
@@ -224,7 +224,7 @@ pub fn quantize_with_dither(
         );
     }
     let resolved_strength = if dither_strength.is_nan() {
-        classify_for_auto_dither(src_rgba)
+        classify_for_auto_dither(src_rgba, width)
     } else {
         dither_strength
     };
@@ -565,7 +565,7 @@ pub fn apply_palette(
 /// pixels (skin / sky / landscape gradients);UI screenshots have
 /// long flat-color runs (text backgrounds, solid panels).
 #[must_use]
-pub fn classify_for_auto_dither(src_rgba: &[u8]) -> f32 {
+pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
     let mut n_opaque = 0usize;
     let mut n_total = 0usize;
     for px in src_rgba.chunks_exact(4) {
@@ -612,9 +612,51 @@ pub fn classify_for_auto_dither(src_rgba: &[u8]) -> f32 {
         runs as f64 / total_runs as f64
     };
     if mean_run > 2.0 {
-        0.25 // tier-3: UI screenshot
+        return 0.25; // tier-3: UI screenshot
+    }
+    // tier-4 content split: variance of adjacent-pixel luminance diff
+    // distinguishes textured photos (high var, want d=0.7) from smooth
+    // portrait-class photos (low var, d=0.5 sweet spot). Cycle 11 sweep
+    // on 4 photo fixtures:
+    //   04-portrait var=34  → d=0.5  (face features, smooth skin tones)
+    //   07-product var=85   → d=0.7  (product texture + soft background)
+    //   05-mountain var=320 → d=0.75 (rocks, water, sky texture)
+    //   06-landscape var=665→ d=0.7
+    // Threshold var > 50 cleanly separates 04 from {05,06,07}.
+    let w = width.max(1) as usize;
+    if w < 2 {
+        return 0.5;
+    }
+    let h = n_total / w;
+    let step = if n_total > 1_000_000 { 4 } else { 1 };
+    let mut sum_diff: u64 = 0;
+    let mut sum_sq: u64 = 0;
+    let mut count: u64 = 0;
+    for y in (0..h).step_by(step) {
+        for x in 0..w - 1 {
+            let i = (y * w + x) * 4;
+            let l0 = (src_rgba[i] as u32 + src_rgba[i + 1] as u32
+                    + src_rgba[i + 2] as u32) / 3;
+            let l1 = (src_rgba[i + 4] as u32 + src_rgba[i + 5] as u32
+                    + src_rgba[i + 6] as u32) / 3;
+            let d = (l0 as i32 - l1 as i32).unsigned_abs() as u64;
+            sum_diff += d;
+            sum_sq += d * d;
+            count += 1;
+        }
+        if count > 1_000_000 {
+            break;
+        }
+    }
+    if count == 0 {
+        return 0.5;
+    }
+    let mean = sum_diff as f64 / count as f64;
+    let var = (sum_sq as f64 / count as f64) - mean * mean;
+    if var > 50.0 {
+        0.7 // tier-4b: textured photo
     } else {
-        0.5  // tier-4: photo
+        0.5 // tier-4a: portrait / smooth photo
     }
 }
 

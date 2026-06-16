@@ -61,6 +61,16 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 11 — tier-4 content-aware dither split(v0.5.30,ship)
+- Cycle 9 sweep showed 04 portrait wants d=0.5(skin smooth),05/06/07
+  want d=0.7(textured)。 Need signal to split within tier-4。
+- `var(adjacent-pixel luminance diff)` cleanly separates:04 var=34
+  vs {05=320, 06=665, 07=85}。 Threshold `var > 50`。
+- Auto bench(`cycle11_tier4_split`):04 unchanged,05 +1.09 SSIM /
+  +4% size,06 +0.41 / +2.3%,07 +0.38 / +3.8%。Total +1.88 SSIM
+  across 3 textured photos;7-fixture average **+0.27 SSIM/image**。
+- Essay:`03m-cycle11-tier4-content-split.md`。
+
 ### Cycle 10 — Path B filter selection deep dive(research-only,no ship)
 - Per-chunk decomp of 04-portrait Path A vs Path B shows IDAT diff
   110 KB(484 KB vs 594 KB)
