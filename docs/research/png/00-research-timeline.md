@@ -61,6 +61,18 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 12-13 — 05 ceiling profile + default policy(research-only,no ship)
+- 05-mountain palette-saturated at 256;Lloyd's converged by iter=100
+- imagequant s=1 corpus sweep:**-1.18 SSIM net** due to 02-pluto
+  -8.45 collapse;don't wire effort → IQ speed
+- `--dither auto` vs `off` corpus diff:+1.72 SSIM mean / +9.7% size
+  total;**keep default `off`** to preserve TinyPNG size advantage on
+  05/07 (mission "又小又好" needs both)
+- 05 SSIM 76.82 is **practical ceiling** for current algorithm shape;
+  further gains need orthogonal innovation(blue-noise dither /
+  SSIMULACRA2-aware loss / regional dither)
+- Essay:`03n-cycle12-13-ceiling-floor.md`
+
 ### Cycle 11 — tier-4 content-aware dither split(v0.5.30,ship)
 - Cycle 9 sweep showed 04 portrait wants d=0.5(skin smooth),05/06/07
   want d=0.7(textured)。 Need signal to split within tier-4。
