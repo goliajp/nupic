@@ -44,19 +44,29 @@ pub fn filter_image_single(width: u32, height: u32, indices: &[u8], ft: FilterTy
     out
 }
 
-/// **BestOf**: produce candidate filtered streams for 7 strategies
-/// (5 single-filter + per-row min-SAD + per-row deflate-aware), measure
-/// each via `nupic-deflate Level::Fast` as a cheap size proxy, return
-/// the smallest. Picks up cross-row LZ77 context that per-row
-/// strategies miss — especially valuable on natural-image content
-/// where one global filter dominates the per-row heuristic.
+/// **BestOf**: produce candidate filtered streams for 6 strategies
+/// (5 single-filter + per-row min-SAD), measure each via
+/// `nupic-deflate Level::Fast` as a cheap size proxy, return the
+/// smallest. Picks up cross-row LZ77 context that per-row strategies
+/// miss — especially valuable on natural-image content where one
+/// global filter dominates the per-row heuristic.
 ///
-/// Cost: ~ 7 × (filter + Level::Fast deflate) per image. Final output
-/// re-deflates with `Level::Best` downstream, so the proxy ranking
-/// only needs to be approximately correct.
+/// Cost: ~ 6 × (filter pass + Level::Fast deflate of whole stream).
+/// Final output re-deflates with `Level::Best` downstream, so the
+/// proxy ranking only needs to be approximately correct.
+///
+/// **Phase 2.3 perf fix**:`filter_image_deflate_aware` removed from
+/// the candidate set。Its per-row trial-deflate (5 filters × ~hundreds
+/// of rows × Level::Fast deflate per row) is the dominant cost on
+/// highly-compressible inputs (transparent regions, flat UI panels)
+/// where LZ77 chain search walks long runs。Caller can still invoke
+/// `FilterStrategy::DeflateAware` explicitly for small inputs。
+/// Removing it from BestOf cuts encode time 10-50× on
+/// transparent-heavy / UI inputs without measurable size or SSIM
+/// regression on corpus(per `03i-perf-cliff` essay)。
 #[must_use]
 pub fn filter_image_best_of(width: u32, height: u32, indices: &[u8]) -> Vec<u8> {
-    let mut candidates: Vec<Vec<u8>> = Vec::with_capacity(7);
+    let mut candidates: Vec<Vec<u8>> = Vec::with_capacity(6);
     for ft in [
         FilterType::None,
         FilterType::Sub,
@@ -67,7 +77,6 @@ pub fn filter_image_best_of(width: u32, height: u32, indices: &[u8]) -> Vec<u8> 
         candidates.push(filter_image_single(width, height, indices, ft));
     }
     candidates.push(filter_image(width, height, indices));
-    candidates.push(filter_image_deflate_aware(width, height, indices));
 
     candidates
         .into_iter()
@@ -191,6 +200,34 @@ fn apply_filter(ft: FilterType, row: &[u8], prev_row: &[u8], out: &mut [u8]) {
             FilterType::Paeth => v.wrapping_sub(paeth_predictor(a, b, c)),
         };
     }
+}
+
+/// Mean length of consecutive identical-byte runs in `data`. Used as
+/// a cheap classifier in `encode_indexed_png` to detect highly-
+/// compressible run-heavy input(transparent regions, flat UI panels)
+/// and skip Level::Best iterative cost-DP overhead。
+#[must_use]
+pub fn mean_run_length(data: &[u8]) -> f64 {
+    if data.is_empty() {
+        return 0.0;
+    }
+    let mut runs: u64 = 0;
+    let mut total_runs: u64 = 0;
+    let mut prev = data[0];
+    let mut cur_run: u64 = 1;
+    for &b in &data[1..] {
+        if b == prev {
+            cur_run += 1;
+        } else {
+            runs += cur_run;
+            total_runs += 1;
+            cur_run = 1;
+        }
+        prev = b;
+    }
+    runs += cur_run;
+    total_runs += 1;
+    runs as f64 / total_runs as f64
 }
 
 /// Heckbert's per-row heuristic: sum of |signed-byte| values. PNG spec
