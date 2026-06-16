@@ -106,6 +106,8 @@ pub fn quantize_indexed_png(
     } else {
         apply_palette_rgba(src_rgba, width, height, &palette_oklab, &palette_alpha)
     };
+    let (indices, palette_srgb, palette_alpha) =
+        compact_palette(indices, palette_srgb, palette_alpha);
     let trns_opt = if palette_alpha.iter().all(|&a| a == 255) {
         None
     } else {
@@ -206,6 +208,8 @@ pub fn quantize_with(
     }
     let (indices, palette_srgb) =
         apply_palette_rgba(src_rgba, width, height, &palette_oklab, &palette_alpha);
+    let (indices, palette_srgb, palette_alpha) =
+        compact_palette(indices, palette_srgb, palette_alpha);
     Ok(QuantizedImage { indices, palette_srgb, palette_alpha })
 }
 
@@ -648,6 +652,36 @@ pub fn apply_palette_rgba_fs_dither(
     let palette_srgb: Vec<Rgb<u8>> =
         palette_oklab.iter().map(|c| oklab_to_srgb_u8(*c)).collect();
     (indices, palette_srgb)
+}
+
+/// Compact (indices, palette_srgb, palette_alpha) by removing unused
+/// palette entries and remapping indices. Necessary after
+/// `refine_palette_kmeans` because padded dupes / failed splits leave
+/// 0-pixel entries that bloat the PLTE chunk without helping quality.
+/// Phase 2.7 ship — restores small-image Auto < Lossless contract.
+#[must_use]
+pub fn compact_palette(
+    indices: Vec<u8>,
+    palette_srgb: Vec<Rgb<u8>>,
+    palette_alpha: Vec<u8>,
+) -> (Vec<u8>, Vec<Rgb<u8>>, Vec<u8>) {
+    debug_assert_eq!(palette_srgb.len(), palette_alpha.len());
+    let mut used = [false; 256];
+    for &i in &indices {
+        used[i as usize] = true;
+    }
+    let mut remap = [0u8; 256];
+    let mut new_srgb: Vec<Rgb<u8>> = Vec::with_capacity(palette_srgb.len());
+    let mut new_alpha: Vec<u8> = Vec::with_capacity(palette_alpha.len());
+    for j in 0..palette_srgb.len() {
+        if used[j] {
+            remap[j] = new_srgb.len() as u8;
+            new_srgb.push(palette_srgb[j]);
+            new_alpha.push(palette_alpha[j]);
+        }
+    }
+    let new_indices: Vec<u8> = indices.iter().map(|&i| remap[i as usize]).collect();
+    (new_indices, new_srgb, new_alpha)
 }
 
 /// Alpha-aware variant of [`apply_palette`]. Each pixel is matched
