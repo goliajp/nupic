@@ -61,6 +61,17 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 18 — Path B filter ranking Level::Best test(negative,research-only)
+- 假设:`filter_image_best_of` 用 Level::Fast ranking 与 final Level::Best
+  不一致,可能导致 sub-optimal filter pick
+- 试改:ranking 用 final Level(mrl-determined)
+- 结果:**sizes 完全不变**(04 594681,05 402282,06 1095841,07 379504),
+  wall-clock 慢 5-15×(05 from 2s → 62s)
+- 结论:Fast 和 Best ranking 选同一个 filter — Path B size gap **不在
+  filter selection**,而在 deflate quality(Cycle 10 已确认)。 唯一通路
+  closing Path B gap = nupic-deflate stage 2(libdeflate-class cost-DP)
+- 评论保留在 `filter_image_best_of`,no version bump
+
 ### Cycle 17 — var-diff sampling bias fix(v0.5.33,ship)
 - Coverage attack:`cycle17_var_diff_sampling` 3-part bench 测原 corpus
   外的大图行为

@@ -77,6 +77,9 @@ pub fn filter_image_best_of(width: u32, height: u32, indices: &[u8]) -> Vec<u8> 
     candidates.push(filter_image(width, height, indices));
     candidates.push(filter_image_deflate_aware(width, height, indices));
 
+    // Note: ranking uses Level::Fast for compute speed. Cycle 18
+    // tested Level::Best ranking — sizes UNCHANGED (Fast and Best
+    // ranking agree on filter choice) while wall-clock 5-15× slower.
     candidates
         .into_iter()
         .min_by_key(|filtered| {
