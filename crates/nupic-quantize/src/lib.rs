@@ -676,7 +676,19 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
         return 0.5;
     }
     let h = n_total / w;
-    let step = if n_total > 1_000_000 { 4 } else { 1 };
+    // Phase 3.3 (Cycle 17): proportional step so sampled rows span the
+    // FULL image height regardless of size. Pre-Phase-3.3 used a fixed
+    // step=4 with count-cap-break; for > 4 MP images (e.g. 1200×6400)
+    // the break truncated sampling at top ~50% rows, biasing var-diff
+    // to top-half content — adversarial test (cycle17_var_diff_sampling
+    // part 3) confirmed smooth-top + textured-bot returned d=0.5 while
+    // textured-top + smooth-bot returned d=0.7 on identical pixel pool.
+    // New: target ~500 K samples by tuning step ∝ n_total / target;
+    // every row reached, no early break.
+    const TARGET_SAMPLES: usize = 500_000;
+    let samples_per_row = (w - 1).max(1);
+    let target_rows = TARGET_SAMPLES.div_ceil(samples_per_row);
+    let step = (h / target_rows.max(1)).max(1);
     let mut sum_diff: u64 = 0;
     let mut sum_sq: u64 = 0;
     let mut count: u64 = 0;
@@ -691,9 +703,6 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
             sum_diff += d;
             sum_sq += d * d;
             count += 1;
-        }
-        if count > 1_000_000 {
-            break;
         }
     }
     if count == 0 {

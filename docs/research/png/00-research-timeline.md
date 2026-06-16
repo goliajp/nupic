@@ -61,6 +61,20 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 17 — var-diff sampling bias fix(v0.5.33,ship)
+- Coverage attack:`cycle17_var_diff_sampling` 3-part bench 测原 corpus
+  外的大图行为
+- **Bug 发现**:n_total > 1M 时 step=4 + count > 500K break 截断到
+  top ~50% 行;1200×6400 adversarial:smooth_top+textured_bot 给
+  d=0.5,textured_top+smooth_bot 给 d=0.7 — 同 pixel pool 仅因垂直翻转
+  得到不同 d 选择
+- 影响:真实 4K photo(8 MP,sky-top + ground-bot)会被 top 半 var 主导
+- Fix:proportional step `h / target_rows`(TARGET=500K samples),
+  step 按 image height 缩放,no break,reach full image
+- 7-fixture 原 corpus **bit-exact identical**(均 ≤ 2.7 MP,走 step=1
+  或 step=4-reachable 路径,fix 不影响)
+- Essay:`03q-cycle17-sampling-bias-fix.md`
+
 ### Cycle 16 — Lloyd's perf attempts(both negative,research-only)
 - A1:par_chunks + per-thread Acc + reduce → **3× SLOWER**
   (Acc{9 Vec × 256 × 8B} alloc + reduce 远超 sequential's L1-cache
