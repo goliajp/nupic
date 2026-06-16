@@ -124,14 +124,47 @@ batch processing 时 opt-in。
 
 ---
 
-## 5. 下一步
+## 5. v0.5.18 — content-adaptive `--dither auto`(已 ship)
+
+`classify_for_auto_dither(src_rgba) -> f32`:
+
+```
+opaque_ratio = pixels with alpha=255 / total
+if opaque_ratio >= 0.95 && n_pixels >= 200_000:
+    return 0.25
+else:
+    return 0.0
+```
+
+**Strength 0.25(not 0.5)**:dogfood 实测 testflight(3 MP fully-opaque
+UI)at 0.5 small regression(-0.13 SSIM);0.25 stays in the positive
+on UI screenshots while still helping photos。 Conservative default。
+
+CLI:`--dither off`(=0.0,旧 default)| `--dither auto`(classifier)|
+`--dither <float>`(explicit 0.0..=1.0)。Default 仍 `off` 保持"严格 size
+sweet spot",`auto` 是 opt-in "free quality bump for opaque large images"。
+
+dogfood 实测 v0.5.18:
+
+| input | off size/SSIM | **auto size/SSIM** | Δsize | ΔSSIM |
+|---|---|---|---|---|
+| testflight UI | 19 828 / 84.72 | 20 405 / **84.83** | +577 | **+0.11** |
+| vantage UI | 279 259 / 81.32 | 304 035 / **81.50** | +24 776 | **+0.18** |
+| 04 photo | 380 748 / 82.95 | 386 115 / **83.45** | +5 367 | **+0.51** |
+| 03 logo | 12 658 / 89.49 | 12 658 / 89.49 | 0 | 0 |
+
+每个 case **non-regression**。Logo classifier 正确 skip,opaque-large
+input get small-to-meaningful quality bump。
+
+未来 cleaner classifier 候选:
+
+- **detect UI screenshot vs photo**:UI 有 long flat runs;photo has
+  smooth gradients。Per-image local-variance metric 可分辨。
+- 让 `auto` 在 photo 上 pick 0.5,UI 上 pick 0.25(分级 strength)。
+
+## 6. 下一步
 
 剩余 ceiling 攻击空间:
-
-- **content-adaptive dither**:per-image classifier(photo / logo /
-  transparent / mixed)→ auto-pick dither strength。No-cost win for
-  "又小又好" because logos / transparent get 0 strength,photos get
-  0.5。Research candidate。
 - **selective dither**:per-pixel adaptive,only diffuse residual if
   `|residual| > THRESHOLD`。Preserves flat regions exactly。Research
   candidate。

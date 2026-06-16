@@ -87,14 +87,21 @@ pub fn quantize_indexed_png(
         &palette_alpha,
         DEFAULT_REFINE_ITERS,
     );
-    let (indices, palette_srgb) = if opts.dither_strength > 0.0 {
+    // Resolve dither strength: NaN means "auto-classify"; finite > 0
+    // means explicit; else no dither.
+    let resolved_strength = if opts.dither_strength.is_nan() {
+        classify_for_auto_dither(src_rgba)
+    } else {
+        opts.dither_strength
+    };
+    let (indices, palette_srgb) = if resolved_strength > 0.0 {
         apply_palette_rgba_fs_dither(
             src_rgba,
             width,
             height,
             &palette_oklab,
             &palette_alpha,
-            opts.dither_strength,
+            resolved_strength,
         )
     } else {
         apply_palette_rgba(src_rgba, width, height, &palette_oklab, &palette_alpha)
@@ -381,6 +388,43 @@ pub fn apply_palette(
     let alpha = vec![255u8; palette.len()];
     let (indices, palette_srgb) = apply_palette_rgba(src_rgba, width, height, palette, &alpha);
     (indices, palette_srgb)
+}
+
+/// Auto-pick Stone E dither strength from a cheap content classifier.
+///
+/// Returns:
+/// - `0.25` for fully-opaque large rasters
+///   (`opaque_ratio ≥ 0.95 && n_pixels ≥ 200_000`):light dither,
+///   strict-win on photo fixtures (+0.3..+0.9 SSIMULACRA2),
+///   neutral / marginal-positive on UI screenshots (+0.1).
+/// - `0.0` otherwise (transparent / small logos):skip dither —
+///   Stone D's no-dither path already wins on those.
+///
+/// `0.25` is chosen over `0.5` after dogfood revealed UI text
+/// screenshots (e.g. testflight) classify as "fully-opaque large"
+/// alongside photos but mild regression at `0.5` (-0.13 SSIM).
+/// `0.25` keeps that case in the positive,gives ~half the photo
+/// benefit at half the size cost。Users wanting full photo benefit
+/// can pass `--dither 0.5` explicitly。
+#[must_use]
+pub fn classify_for_auto_dither(src_rgba: &[u8]) -> f32 {
+    let mut n_opaque = 0usize;
+    let mut n_total = 0usize;
+    for px in src_rgba.chunks_exact(4) {
+        n_total += 1;
+        if px[3] == 255 {
+            n_opaque += 1;
+        }
+    }
+    if n_total == 0 {
+        return 0.0;
+    }
+    let opaque_ratio = n_opaque as f64 / n_total as f64;
+    if opaque_ratio >= 0.95 && n_total >= 200_000 {
+        0.25
+    } else {
+        0.0
+    }
 }
 
 /// Floyd-Steinberg light dither in OKLab+alpha space. `strength`

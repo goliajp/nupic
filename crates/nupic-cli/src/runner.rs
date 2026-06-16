@@ -290,6 +290,19 @@ fn run_bench_vs_baseline(args: BenchArgs) -> Result<()> {
     }
 }
 
+/// Parse `--dither` arg: `"off"` → 0.0, `"auto"` → NaN sentinel
+/// (nupic-quantize::quantize_indexed_png treats NaN as "run
+/// classify_for_auto_dither on this image"), explicit `"0.5"` → 0.5.
+fn parse_dither(s: &str) -> Result<f32> {
+    match s {
+        "off" | "Off" | "OFF" => Ok(0.0),
+        "auto" | "Auto" | "AUTO" => Ok(f32::NAN),
+        other => other
+            .parse::<f32>()
+            .map_err(|e| anyhow!("--dither: expected `off`/`auto`/`0.0..1.0`, got {other:?}: {e}")),
+    }
+}
+
 fn parse_formats(s: &str) -> Result<Vec<Format>> {
     let mut out = Vec::new();
     for token in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
@@ -545,7 +558,7 @@ fn run_compress(args: CompressArgs) -> Result<()> {
             strip_metadata: args.strip_metadata,
             effort: args.effort,
             use_nupic_png: args.use_nupic_png,
-            dither_strength: args.dither,
+            dither_strength: parse_dither(&args.dither)?,
         };
         let encoded = img.compress(opts)?;
         write_bytes_output(Some(&per_output), &encoded.bytes)?;

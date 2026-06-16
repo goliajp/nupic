@@ -322,14 +322,14 @@ pub struct CompressArgs {
     #[arg(long, default_value_t = false)]
     pub use_nupic_png: bool,
 
-    /// **Stone E light dither** strength for the indexed PNG path,
-    /// 0.0 (default, no dither — "又小又好" sweet spot for most
-    /// workloads) to 1.0 (canonical Floyd-Steinberg).
-    /// Sweet spot for photo-heavy inputs is ~0.5 (+1~5 SSIMULACRA2 pts,
-    /// +2-17% size on photo fixtures). Logos and pure-flat content
-    /// see no benefit and slight regression.
-    #[arg(long, default_value_t = 0.0)]
-    pub dither: f32,
+    /// **Stone E light dither** for the indexed PNG path. Accepts
+    /// `off` (= 0.0, default — "又小又好" sweet spot for mixed
+    /// corpora), `auto` (classifier picks 0.5 on fully-opaque large
+    /// rasters i.e. photos, 0.0 otherwise), or an explicit float
+    /// `0.0..=1.0` (0.5 is the photo sweet spot, 1.0 is canonical
+    /// Floyd-Steinberg). See `docs/research/png/03e-stone-e-fs-dither.md`.
+    #[arg(long, default_value = "off")]
+    pub dither: String,
 }
 
 #[derive(Debug, Args)]
