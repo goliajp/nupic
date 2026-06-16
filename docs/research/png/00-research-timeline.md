@@ -61,6 +61,18 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 9 — tier-4 fine-strength sweep(research-only,no ship)
+- (research-only) Sweep d ∈ {0.5, 0.6, 0.7, 0.75} on photo fixtures:
+  - 04-portrait:peak 0.5(0.6+ slight regress)
+  - 05-mountain:monotonic to 0.75,+1.20 vs 0.5
+  - 06-landscape:peak 0.7,+0.41 vs 0.5
+  - 07-product:peak 0.7,+0.38 vs 0.5
+- No simple signal differentiates 04 from 05/06/07 (all 1200×800 or
+  similar,all 256 palette colors after Stone D pad+split,no aspect
+  ratio distinction)。Future work:content-aware tier-4 strength
+  (face vs landscape detection)— could capture +0.4-1.2 SSIM on 3 of
+  4 photo fixtures without 04 regression。
+
 ### Cycle 8 — dogfood verify + 02-pluto tier-2 dither(0.5.27-0.5.28)
 - 0.5.27 unpin `rust-version`(no longer pin 1.85,track latest stable
   toolchain per user directive)
