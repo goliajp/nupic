@@ -61,6 +61,23 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 20 — tier-2 dither 0.25 → 0.35 Pareto bump(v0.5.34,ship)
+- 02-pluto-transparent dither sweep:d=0.25 给 SSIM 80.44,d=0.35 给
+  80.73(+0.29 SSIM / +1.7 KB),d=0.50 给 80.87(peak,但 +4 KB)
+- Pareto best = d=0.35:最优 SSIM/byte trade
+- 02 是 corpus 唯一 tier-2 fixture(partial transparent);其他 6 fixture
+  output bit-exact 不变
+- 219 workspace tests 全绿
+
+### Cycle 19 — serpentine FS dither A/B(negative,research-only)
+- 假设:serpentine scan(alternate L→R / R→L per row)减少 directional
+  smear,boost photo SSIM
+- 实测:5 dithered fixtures mean Δ SSIM = **-0.045**(02 lost 0.20,
+  其他 ≈ 0)
+- 结论:OKLab+alpha 高维 diffusion + Lloyd's-refined palette 已经
+  symmetric enough;serpentine 在我们 setup 下 no signal
+- 评论留在 `apply_palette_rgba_fs_dither`,no version bump
+
 ### Cycle 18 — Path B filter ranking Level::Best test(negative,research-only)
 - 假设:`filter_image_best_of` 用 Level::Fast ranking 与 final Level::Best
   不一致,可能导致 sub-optimal filter pick

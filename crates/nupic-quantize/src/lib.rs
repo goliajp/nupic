@@ -630,7 +630,15 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
         return 0.0; // tier-1: transparency-dominant
     }
     if opaque_ratio < 0.95 {
-        return 0.25; // tier-2: partially-transparent photo (02-pluto class)
+        // tier-2: partially-transparent photo (02-pluto class).
+        // Cycle 20: dither sweep on 02 (the only tier-2 corpus fixture)
+        // showed d=0.35 Pareto-optimal:
+        //   d=0.00 size=158109 SSIM=79.66
+        //   d=0.25 size=162009 SSIM=80.44 (pre-Cycle-20 default)
+        //   d=0.35 size=163674 SSIM=80.73 (chosen — +0.29 SSIM / +1.7KB)
+        //   d=0.50 size=166057 SSIM=80.87 (peak SSIM but +4KB)
+        //   d=0.70 size=168753 SSIM=80.39 (regresses)
+        return 0.35;
     }
     // tier-3 vs tier-4: mean-run-length signal.
     let mut runs: u64 = 0;
@@ -751,7 +759,7 @@ pub fn apply_palette_rgba_fs_dither(
 
     // Pre-convert all pixels to OKLab + scaled alpha (so diffusion is
     // dimensionally consistent with the distance metric).
-    let mut pixels: Vec<(f32, f32, f32, f32)> = src_rgba
+    let pixels: Vec<(f32, f32, f32, f32)> = src_rgba
         .chunks_exact(4)
         .map(|px| {
             let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
@@ -764,12 +772,17 @@ pub fn apply_palette_rgba_fs_dither(
     let palette_alpha_scaled: Vec<f32> = palette_alpha
         .iter().map(|&a| a as f32 * ALPHA_SCALE).collect();
 
+    // Cycle 19 NOTE: serpentine-scan variant tried (alternate row L→R
+    // / R→L scan to reduce directional smear). On 5 dithered fixtures,
+    // net Δ SSIM = -0.045 (02 lost 0.2, others ≈ 0). OKLab+alpha
+    // high-dim diffusion + Lloyd's-refined palette already symmetric
+    // enough; serpentine adds no signal. Standard FS retained.
     let mut indices = vec![0u8; n_pixels];
+    let mut pixels = pixels;
     for y in 0..h {
         for x in 0..w {
             let idx = y * w + x;
             let (l, a, b, pa) = pixels[idx];
-
             let mut best_j = 0usize;
             let mut best_d2 = f32::INFINITY;
             for j in 0..k {
