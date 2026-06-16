@@ -314,6 +314,13 @@ pub struct CompressArgs {
     /// Encoder effort, 0 (fastest) to 10 (slowest, best compression).
     #[arg(long, default_value_t = 5)]
     pub effort: u8,
+
+    /// **Experimental:** route `Quality::Auto` PNG output through the
+    /// self-built `nupic-png` + `nupic-deflate` backend instead of
+    /// `oxipng`. As of 0.5.10 this produces ~ 1.10× larger files on
+    /// average — opt in to A/B compare the integration path.
+    #[arg(long, default_value_t = false)]
+    pub use_nupic_png: bool,
 }
 
 #[derive(Debug, Args)]

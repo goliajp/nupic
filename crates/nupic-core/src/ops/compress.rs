@@ -56,6 +56,14 @@ pub struct CompressOpts {
     pub strip_metadata: bool,
     /// Encoder effort, 0 (fastest) ..= 10 (slowest, best compression).
     pub effort: u8,
+    /// **Experimental:** route `Quality::Auto` PNG output through the
+    /// self-built `nupic-png` + `nupic-deflate` backend instead of
+    /// `oxipng`. As of 0.5.10 this produces ~ 1.10× larger files on
+    /// average (1.04-1.35× across fixtures) but removes the `oxipng`
+    /// dep tree from the binary. Off by default — opt-in to test
+    /// integration, file size will improve as `nupic-png` polishes
+    /// land in 0.6.x.
+    pub use_nupic_png: bool,
 }
 
 impl Default for CompressOpts {
@@ -65,6 +73,7 @@ impl Default for CompressOpts {
             quality: Quality::Auto,
             strip_metadata: false,
             effort: 5,
+            use_nupic_png: false,
         }
     }
 }
@@ -177,6 +186,9 @@ fn encode_png(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
 }
 
 fn encode_png_stone_c(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
+    if opts.use_nupic_png {
+        return encode_png_stone_c_nupic(img, opts);
+    }
     let rgba = img.inner().to_rgba8();
     let (w, h) = (rgba.width(), rgba.height());
     let raw = rgba.into_raw();
@@ -187,6 +199,33 @@ fn encode_png_stone_c(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     };
     nupic_quantize::quantize_indexed_png(&raw, w, h, qopts)
         .map_err(|e| Error::Codec(Box::new(e)))
+}
+
+/// Experimental `Quality::Auto` PNG path that uses the self-built
+/// `nupic-png` + `nupic-deflate` backend instead of `oxipng`. Opt-in
+/// via [`CompressOpts::use_nupic_png`]. Produces ~ 1.04-1.35× larger
+/// PNG files vs the `oxipng` path as of 0.5.10 (cross-fixture average
+/// 1.10× with `FilterStrategy::DeflateAware`); will close as
+/// `nupic-png` filter polish lands in 0.6.x.
+fn encode_png_stone_c_nupic(img: &Image, _opts: &CompressOpts) -> Result<Vec<u8>> {
+    let rgba = img.inner().to_rgba8();
+    let (w, h) = (rgba.width(), rgba.height());
+    let raw = rgba.into_raw();
+    let qi = nupic_quantize::quantize(&raw, w, h, 256)
+        .map_err(|e| Error::Codec(Box::new(e)))?;
+    let png_img = nupic_png::IndexedImage {
+        width: w,
+        height: h,
+        palette: qi.palette_srgb.into_iter().collect::<Vec<rgb::Rgb<u8>>>(),
+        indices: qi.indices,
+        // tRNS not exposed by `nupic_quantize::quantize` yet — alpha is
+        // currently dropped on indexed PNG output regardless of backend.
+        trns: None,
+    };
+    Ok(nupic_png::encode_indexed_png_with(
+        &png_img,
+        nupic_png::FilterStrategy::DeflateAware,
+    ))
 }
 
 fn encode_png_lossless(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {

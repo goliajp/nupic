@@ -102,6 +102,7 @@ fn run_bench(args: BenchArgs) -> Result<()> {
                 quality: Quality::Auto,
                 strip_metadata: false,
                 effort: args.effort,
+            use_nupic_png: false,
             };
             let t0 = std::time::Instant::now();
             let encoded = match img.compress(opts) {
@@ -232,6 +233,7 @@ fn run_bench_vs_baseline(args: BenchArgs) -> Result<()> {
             quality: Quality::Auto,
             strip_metadata: false,
             effort: args.effort,
+            use_nupic_png: false,
         };
         let encoded = img.compress(opts)?;
         let nupic_bytes = encoded.bytes.len() as u64;
@@ -540,6 +542,7 @@ fn run_compress(args: CompressArgs) -> Result<()> {
             quality,
             strip_metadata: args.strip_metadata,
             effort: args.effort,
+            use_nupic_png: args.use_nupic_png,
         };
         let encoded = img.compress(opts)?;
         write_bytes_output(Some(&per_output), &encoded.bytes)?;

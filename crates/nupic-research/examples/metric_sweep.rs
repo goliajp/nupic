@@ -143,6 +143,7 @@ fn nupic_to_rgba8(image: &Image) -> Rgba8Buf {
             quality: nupic_core::Quality::Lossless,
             strip_metadata: true,
             effort: 0,
+            use_nupic_png: false,
         })
         .expect("lossless encode of fixture must succeed");
     let dec = ::image::load_from_memory_with_format(&encoded.bytes, ::image::ImageFormat::Png)

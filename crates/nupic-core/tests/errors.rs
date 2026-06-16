@@ -25,6 +25,7 @@ fn compress_with_auto_format_errors() {
             quality: Quality::Format(80),
             strip_metadata: false,
             effort: 1,
+            use_nupic_png: false,
         })
         .unwrap_err();
     assert!(matches!(err, Error::Invalid(_)), "got: {err:?}");
@@ -39,6 +40,7 @@ fn compress_jpeg_lossless_errors() {
             quality: Quality::Lossless,
             strip_metadata: false,
             effort: 1,
+            use_nupic_png: false,
         })
         .unwrap_err();
     assert!(matches!(err, Error::Invalid(_)), "got: {err:?}");
@@ -53,6 +55,7 @@ fn compress_jxl_unsupported() {
             quality: Quality::Format(80),
             strip_metadata: false,
             effort: 1,
+            use_nupic_png: false,
         })
         .unwrap_err();
     assert!(
@@ -73,6 +76,7 @@ fn compress_perceptual_ssimulacra2_works_in_v0_5() {
             quality: Quality::Perceptual(PerceptualTarget::Ssimulacra2(85.0)),
             strip_metadata: false,
             effort: 1,
+            use_nupic_png: false,
         })
         .expect("Ssimulacra2 perceptual target should work in 0.5.0+");
     assert_eq!(encoded.format, Format::Jpeg);
@@ -90,6 +94,7 @@ fn compress_perceptual_butteraugli_still_not_implemented() {
             quality: Quality::Perceptual(PerceptualTarget::Butteraugli(1.0)),
             strip_metadata: false,
             effort: 1,
+            use_nupic_png: false,
         })
         .unwrap_err();
     assert!(matches!(err, Error::NotImplemented(_)), "got: {err:?}");

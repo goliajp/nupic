@@ -22,6 +22,7 @@ imgref = { workspace = true }
 imagequant = { workspace = true }
 png = { workspace = true }
 nupic-quantize = { path = "../nupic-quantize" }
+nupic-png = { path = "../nupic-png" }
 nupic-ssimulacra = { path = "../nupic-ssimulacra" }
 clap = { workspace = true, optional = true }
 
