@@ -132,6 +132,43 @@ Default-flip threshold not yet met(want ≤ 1.02×)。Phase 2.6 candidates:
 
 ---
 
+## 8. Pass 5-6 — chain depth / iter count sensitivity(0.5.24 reversion)
+
+After Pass 4 ship,explored deflate-side knobs to close residual gap:
+
+| ITER_CHAIN | ITER_PASSES | 04 ratio | 02 ratio | testflight ms | 04 ms |
+|---:|---:|---:|---:|---:|---:|
+| 512(0.5.22 default)| 5 | 1.064× | 1.051× | 33s | 4s |
+| 512 | 10 | 1.063× | 1.049× | ~ 40s(est)| 4s |
+| 512 | 15 | 1.063× | 1.049× | ~ 50s | 4s |
+| 2048 | 10 | 1.061× | 1.047× | 76s | 4s |
+| 4096 | 10 | 1.060× | 1.046× | 100s | 4s |
+
+**Saturating returns**:
+- iter_passes 5 → 15:per-fixture size −100~500 bytes(noise level)
+- chain_depth 512 → 4096:per-fixture size −300~2000 bytes
+- Combined chain × iter cost:**3-4× wall-clock for < 0.5% size improvement**
+
+Decision:revert to 0.5.22 defaults(chain=512,iter=5)。Also re-add
+the 2.4-era size-aware Fast fallback removed in Pass 4 — Level::Best
+always was 30× slower on UI(testflight 1s → 34s)for 46% size win
+which is meaningful but the speed loss is unacceptable for a default
+encode mode。Trade-off curve restored to v0.5.22 state。
+
+**v0.5.24 ship**:effectively same as v0.5.22 from user-facing,with
+Cycle 6 essays documenting the gap-source diagnostic + algorithmic
+ceiling analysis(no closes possible at deflate side beyond NICE_MATCH)。
+
+Genuine Cycle 6 outcome:
+1. Gap decomposition methodology(misread → cleaner ratio)
+2. Filter pick is correct(BestOf Pareto-optimal on all 7)
+3. Real gap is 1.5-6.5% deflate quality vs libdeflate
+4. Deflate side has no cheap improvement available
+5. Default-flip blocked on libdeflate-class deflate(zopfli-class
+   iterative or libdeflate-class C lib implementation needed)
+
+---
+
 ## 7. 价值观
 
 - [[feedback-metric-over-human-eye]] — Pass 1's confused decomposition

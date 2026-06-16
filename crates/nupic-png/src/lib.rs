@@ -150,14 +150,22 @@ pub fn encode_indexed_png_with(img: &IndexedImage, strategy: FilterStrategy) -> 
         }
         FilterStrategy::BestOf => filter::filter_image_best_of(img.width, img.height, &img.indices),
     };
-    // Cycle 6 Pass 4: removed size-aware Fast fallback (was 2.4 ship).
-    // Gap decomposition (`docs/research/png/03k-default-flip-gap.md`)
-    // showed nupic-deflate Best vs libdeflate is only 1.5-6.5% larger
-    // on Path A's filtered rows (not 18% as initial confused decomp
-    // suggested), so the Fast-fallback size cost (+30% on vantage,
-    // +47% on testflight) wasn't worth the wall-clock savings — keep
-    // Level::Best always, rely on NICE_MATCH=128 to bound chain walks.
-    let idat = zlib_wrap(&raw_filtered, Level::Best);
+    // Cycle 6 Pass 5 reversion: Level::Best on UI screenshots is 30-150s
+    // wall-clock for marginal size win on photos (chain=2048 + iter=10
+    // experiment tested no improvement beyond chain=512 + iter=5).
+    // Restore 2.4-era size-aware adaptive — Fast on big_and_flat or
+    // very_flat keeps wall-clock < 11s while photos stay on Best.
+    // 03k essay §5 documents the chain-depth / iter-count sensitivity
+    // research showing 2.4-era trade-off curve is empirically optimal.
+    let mrl = filter::mean_run_length(&raw_filtered);
+    let big_and_flat = raw_filtered.len() > 500_000 && mrl >= 8.0;
+    let very_flat = mrl >= 32.0;
+    let level = if big_and_flat || very_flat {
+        Level::Fast
+    } else {
+        Level::Best
+    };
+    let idat = zlib_wrap(&raw_filtered, level);
     write_chunk(&mut out, b"IDAT", &idat);
 
     // IEND — empty payload
