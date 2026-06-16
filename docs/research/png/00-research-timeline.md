@@ -61,6 +61,22 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 26 — ext corpus 13 / 14 finer sweep(research-only,no ship)
+- **11 photo-noisy** peak d=0.7 = SSIM 81.47(current,no change)
+- **13 very-large-photo**(upscaled 05):peak d=0.7 = SSIM 68.84 vs
+  current d=0.5 = SSIM 66.52(+2.3 / +9% size)。 var=29 触发 tier-4a。
+  Differentiator with 04 = uniq:13 uniq=1.2M vs 04 uniq=25K。 但 13 是
+  bilinear-upscaled合成,not representative real 8 MP photo。 Skip
+  generalize from N=1 数据。
+- **14 soft-transparent**(opq=0.009):peak d=0.5 SSIM 69.96 vs current
+  d=0 SSIM 66.90(+3.1 / +33% size)。 tier-1 single fixture,risky
+  promote。 同样 deferred。
+- 14 lossless = 562 KB / SSIM 100,vs auto 148 KB / 66.9 — auto wins
+  on size,gradient detector correctly skips 14。
+- 13 lossless = 6.2 MB / SSIM 100,vs auto 2.7 MB / 66.5 — auto wins
+  on size,gradient detector correctly skips 13。
+- 结论:13/14 改进需要 2+ fixture validate;extend corpus more 才能 ship
+
 ### Cycle 24-25 — gradient → lossless auto-routing(v0.5.38,ship)
 - Cycle 24:`classify_for_auto_dither` 加 `adj_mn < 1.0 → 0.7` tier-4c
   bucket(extreme-smooth gradient need strong dither against banding)。
