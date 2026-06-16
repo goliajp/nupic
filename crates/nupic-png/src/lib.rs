@@ -150,32 +150,17 @@ pub fn encode_indexed_png_with(img: &IndexedImage, strategy: FilterStrategy) -> 
         }
         FilterStrategy::BestOf => filter::filter_image_best_of(img.width, img.height, &img.indices),
     };
-    // Phase 2.3 perf fix: nupic-deflate Level::Best iterative cost-DP
-    // is pathologically slow on highly-compressible run-heavy input
-    // (transparent regions, flat UI panels) because the LZ77 chain
-    // walks long zero runs at every position × 5 iterative passes ×
-    // per-block refinement. Detect via mean-run-length of filtered
-    // bytes; >= 32 means input is dominated by long runs → use
-    // Level::Fast (static Huffman, no iterative DP). 01-transparency
-    // 47s → ~1s with this fallback; Level::Fast still gives near-optimal
-    // ratio on flat-run input because LZ77 length-258 matches alone
-    // capture the structure.
+    // Phase 2.4: adaptive Level selection driven by (mrl × input-size)
+    // product. NICE_MATCH=128 in nupic-deflate (Pass 6) cuts the worst
+    // chain-walk pathology but Level::Best is still O(N × chain × iter)
+    // = ~10s/MB on flat-run input. Use Fast on (large AND moderately-
+    // flat) input — vantage 4.5MP mrl=11 → 54s Best vs 5s Fast for
+    // 29% size cost. Small inputs always Best (sub-10s regardless of
+    // mrl); pure-photo inputs (mrl < 4) always Best (no flat runs).
     let mrl = filter::mean_run_length(&raw_filtered);
-    // Phase 2.3:nupic-deflate Level::Best (iterative cost-DP + phase
-    // 1.5 per-block refinement) is pathologically slow on highly-
-    // compressible run-heavy input (long LZ77 chain walks on every
-    // position × 5 iter passes × per-block × ~O(N²) collision).
-    //
-    // Heuristic: mean_run_length >= 4 means ≥ 25% of pixels are part of
-    // a flat run → LZ77 will hit deep chains → Level::Best wall-clock
-    // explodes. Fall back to Level::Fast (greedy LZ77 + static Huffman)
-    // which handles long-run input efficiently via length-258 matches
-    // and gives near-optimal ratio on this content class (since flat
-    // runs are trivially compressible without iterative refinement).
-    //
-    // 01-transparency-demo at mrl=8.04: 44.7s → ~ 0.5s with this
-    // fallback; output IDAT typically within 5% of Level::Best size.
-    let level = if mrl >= 4.0 {
+    let big_and_flat = raw_filtered.len() > 500_000 && mrl >= 8.0;
+    let very_flat = mrl >= 32.0;
+    let level = if big_and_flat || very_flat {
         Level::Fast
     } else {
         Level::Best

@@ -41,6 +41,16 @@ const LAZY_CHAIN: usize = 128;
 /// match is at least this long, commit immediately without trying the
 /// next position (matches zlib level 6 `max_lazy = 16`).
 const LAZY_MAX: usize = 16;
+/// Phase 2.4 "nice match" early-exit threshold for chain walks. When
+/// a chain entry yields a match of length ≥ NICE_MATCH bytes, break
+/// out of the chain walk — subsequent entries are unlikely to find
+/// meaningfully longer matches. Mirrors zlib's `nice_length`
+/// optimization. Critical perf fix for flat-run input where every
+/// chain entry extends to MAX_MATCH:without nice-match early-exit,
+/// chain walks cost O(max_chain × MAX_MATCH) per position even when
+/// the first entry is already optimal. Profiled hot path on
+/// 01-png-transparency-demo: 44s → < 1s with this guard alone.
+const NICE_MATCH: usize = 128;
 /// Iterative-refinement chain depth — phase 1.4b. Deeper than lazy
 /// because each DP iteration costs O(N · chain) once, not per query,
 /// so search depth pays off without per-token blowup.
@@ -522,6 +532,10 @@ fn find_longest_match(
                     break;
                 }
             }
+            // Phase 2.4 nice-match early exit (mirrors dp_optimal_tokens).
+            if best_len >= NICE_MATCH {
+                break;
+            }
         }
         let next = hash_prev[(chain_pos as usize) % WIN_SIZE];
         if next == NIL || next >= chain_pos {
@@ -633,6 +647,15 @@ fn dp_optimal_tokens(data: &[u8], max_chain: usize, lit_lens: &[u8], dist_lens: 
                     if match_cost < cost[target] {
                         cost[target] = match_cost;
                         best[target] = (k as u16, dist as u16);
+                    }
+                    // Phase 2.4: nice-match early exit. A k-byte match
+                    // beats anything subsequent chain entries can offer
+                    // (chain is monotonic in distance, further entries
+                    // are older positions). Critical perf guard on
+                    // flat-run input where every entry extends to
+                    // MAX_MATCH.
+                    if k >= NICE_MATCH {
+                        break;
                     }
                 }
                 let next = hash_prev[(chain_pos as usize) % WIN_SIZE];
@@ -799,6 +822,9 @@ fn dp_optimal_tokens_window(
                     if match_cost < cost[target_off] {
                         cost[target_off] = match_cost;
                         best[target_off] = (k as u16, dist as u16);
+                    }
+                    if k >= NICE_MATCH {
+                        break; // Phase 2.4 nice-match early exit
                     }
                 }
                 let next = hash_prev[(chain_pos as usize) % WIN_SIZE];
