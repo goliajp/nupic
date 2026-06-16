@@ -850,24 +850,36 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
     if var > 50.0 {
         return 0.7; // tier-4b: textured photo
     }
-    // Phase 3.9 (Cycle 27): tier-4d high-uniq smooth photos. Real-photo
-    // extended corpus (17-aurora uniq=159K, 20-rainbow uniq=164K, 13
-    // very-large uniq=1.2M) all classified tier-4a (var ≤ 50) but want
-    // d=0.7 (peak SSIM gain +0.7 to +2.3 vs d=0.5). They have smooth
-    // local content (low var) but huge global palette demand (many
-    // distinct colors). 04-portrait (uniq=25K) and 16-earthrise
-    // (uniq=43K) sit below the threshold and prefer d=0.5 (peak).
-    // Threshold 50K cleanly separates the two regimes.
+    // Phase 3.11 (Cycle 30): tier-4d high-uniq smooth photos. Cycle 27
+    // shipped with threshold 50K based on N=3 evidence (13/17/20).
+    // Round-2 corpus (24-melk, 25-sofia, 26-angkor, 27-whale, 28-orca,
+    // 29-sundew) added N=6 more tier-4a fixtures. Re-tune analysis:
+    //
+    //   fixture     uniq    peak d
+    //   04 portrait  25K    0.5  ← keep at 0.5
+    //   16 earthrise 43K    0.5  ← keep at 0.5
+    //   27 whale    118K    0.5  ← Cycle 27 wrongly bumped to 0.7
+    //   29 sundew   131K    0.7
+    //   17 aurora   159K    0.7
+    //   20 rainbow  164K    0.7
+    //   13 very-lg  1.2M    0.7
+    //
+    // Clear gap between 118K (want 0.5) and 131K (want 0.7). Threshold
+    // 120K cleanly separates with no false-positive in current corpus.
+    //
+    // Note: 18 snowflake / 25 sofia / 28 orca have var ≥ 50 (tier-4b,
+    // gets 0.7) but actually want 0.5. Independent misclass NOT fixed
+    // by this cycle. Documented in essay 03w for future research.
     let step_u = if n_total > 1_000_000 { 4 } else { 1 };
-    let mut uniq = std::collections::HashSet::with_capacity(50_500);
+    let mut uniq = std::collections::HashSet::with_capacity(120_500);
     for p in src_rgba.chunks_exact(4).step_by(step_u) {
         if p[3] != 255 { continue; }
         let key = (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16);
         uniq.insert(key);
-        if uniq.len() > 50_000 { break; }
+        if uniq.len() > 120_000 { break; }
     }
-    if uniq.len() > 50_000 {
-        0.7 // tier-4d: high-uniq smooth photo (aurora / rainbow / big-photo class)
+    if uniq.len() > 120_000 {
+        0.7 // tier-4d: high-uniq smooth photo
     } else {
         0.5 // tier-4a: portrait / smooth photo with limited palette
     }

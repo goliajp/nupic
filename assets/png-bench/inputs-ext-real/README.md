@@ -14,3 +14,14 @@ PNG-lossless via `nupic compress --lossless`.
 
 All public domain or CC0-equivalent. Source URLs documented in
 `docs/research/png/03u-cycle27-real-photo-corpus.md`.
+
+# Round 2 (Cycle 30+)
+
+| file | source | dims | MP |
+|---|---|---|---|
+| 24-melk-abbey-24mp.png | Stift Melk Nordseite, Wikimedia | 5971×3981 | 23.8 |
+| 25-sofia-cathedral-5mp.png | Alexander Nevsky Cathedral Sofia, Wikimedia | 2908×1883 | 5.5 |
+| 26-angkor-wat-32mp.png | Angkor Wat reflection, Wikimedia | 7956×4009 | 31.9 |
+| 27-whale-tail-5mp.png | Southern right whale tail, Wikimedia | 3128×1765 | 5.5 |
+| 28-orca-14mp.png | Orcinus orca Loro Parque, Wikimedia | 5787×2493 | 14.4 |
+| 29-sundew-3mp.png | Drosera rotundifolia leaf macro, Wikimedia | 2048×1536 | 3.1 |
