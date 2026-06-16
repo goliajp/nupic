@@ -753,8 +753,10 @@ dependencies = [
  "moxcms",
  "num-traits",
  "png",
+ "qoi",
  "ravif 0.12.0",
  "rayon",
+ "rgb",
  "tiff",
  "zune-core 0.5.1",
  "zune-jpeg 0.5.15",
@@ -1111,7 +1113,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-bits"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "adler32",
  "crc32fast",
@@ -1119,7 +1121,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-cli"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "anyhow",
  "clap",
@@ -1132,7 +1134,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-color"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "fast-srgb8",
  "image",
@@ -1142,7 +1144,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-core"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "ab_glyph",
  "clap",
@@ -1163,7 +1165,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-deflate"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "flate2",
  "nupic-bits",
@@ -1172,8 +1174,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nupic-png"
+version = "0.5.10"
+dependencies = [
+ "image",
+ "nupic-bits",
+ "nupic-deflate",
+ "png",
+ "rgb",
+]
+
+[[package]]
 name = "nupic-quantize"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "image",
  "imagequant",
@@ -1187,7 +1200,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-research"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "adler32",
  "anyhow",
@@ -1200,6 +1213,7 @@ dependencies = [
  "nupic-color",
  "nupic-core",
  "nupic-deflate",
+ "nupic-png",
  "nupic-quantize",
  "nupic-ssimulacra",
  "oklab",
@@ -1215,7 +1229,7 @@ dependencies = [
 
 [[package]]
 name = "nupic-ssimulacra"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "image",
  "rayon",
@@ -1359,6 +1373,15 @@ name = "pxfm"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0c5ccf5294c6ccd63a74f1565028353830a9c2f5eb0c682c355c471726a6e3f"
+
+[[package]]
+name = "qoi"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f6d64c71eb498fe9eae14ce4ec935c555749aef511cca85b5568910d6e48001"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "quick-error"

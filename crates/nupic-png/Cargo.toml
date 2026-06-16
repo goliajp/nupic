@@ -1,0 +1,19 @@
+[package]
+name = "nupic-png"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Self-built PNG encoder for the nupic codec pipeline. Indexed-color path (8-bit palette + optional tRNS for alpha) with per-row filter try-all (None/Sub/Up/Average/Paeth, min-SAD heuristic), CRC-32 chunked output, and zlib-wrapped IDAT compressed via `nupic-deflate Level::Best`. Stage 2 of the PNG codec roadmap — replaces the `oxipng` dep in the `Quality::Auto` pipeline. Round-trips bit-exact through the `image` crate decoder."
+
+[dependencies]
+nupic-bits = { path = "../nupic-bits" }
+nupic-deflate = { path = "../nupic-deflate" }
+rgb = { workspace = true }
+
+[dev-dependencies]
+# Reference decoder for roundtrip tests.
+png = "0.18"
+image = { version = "0.25", features = ["png"] }
