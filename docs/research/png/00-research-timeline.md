@@ -61,6 +61,16 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 22 — 01-transparency-demo dither sweep(research-only)
+- 01 当前 tier-1(opaque_ratio 0.036 → transparency-dominant → d=0)
+- finer dither sweep:每 KB +0.5 SSIM linear,无 sweet spot
+- d=0.10 → +2 KB / +1.6 SSIM,d=0.15 → +3.1 KB / +2.1 SSIM,d=0.30 → +6.7 KB / +5.4 SSIM
+- 01 SSIM 仍 -46 ~ -41(fundamental palette quantize loss on synthetic
+  transparency grid);nupic vs Tiny 01:nupic -46 vs Tiny -492 = 已 +446 优势
+- 决策:**保留 tier-1 = 0.0**(N=1 fixture 无法 generalize tier-1b
+  sub-rule,且 size penalty 显著 vs SSIM gain)
+- Example:`cycle22_01_classify.rs` 记录分类诊断
+
 ### Cycle 21 — `--effort 7-10` unlocks oxipng Zopfli deflater(v0.5.35,ship)
 - Probe(`cycle21_zopfli_probe`):full corpus Libdeflater vs Zopfli iter=15
 - Zopfli **每 fixture -23~-2496 B**,total **-8714 B(-0.32%)**;
