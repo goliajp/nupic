@@ -356,6 +356,15 @@ fn oxipng_optimize(raw_png: &[u8], opts: &CompressOpts) -> Result<Vec<u8>> {
     if opts.strip_metadata {
         oxipng_opts.strip = oxipng::StripChunks::Safe;
     }
+    // Cycle 21 follow-up: also wire Zopfli into the lossless / lossy /
+    // generic oxipng path (was only wired in encode_png_stone_c). Same
+    // mapping: effort ≥ 7 → Zopfli iters = (effort-6) × 5, capped 30.
+    if opts.effort >= 7 {
+        let iters = ((opts.effort - 6) * 5).min(30).max(1);
+        oxipng_opts.deflate = oxipng::Deflaters::Zopfli {
+            iterations: std::num::NonZeroU8::new(iters).unwrap(),
+        };
+    }
     oxipng::optimize_from_memory(raw_png, &oxipng_opts)
         .map_err(|e| Error::Codec(Box::new(e)))
 }
