@@ -61,6 +61,20 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 7 — palette ceiling close(0.5.25+)
+- 0.5.25 Stone D **palette pad + split-on-empty**:imagequant returns
+  < n_colors when quality threshold(95)met early(04-portrait 114 of
+  256 slots used);pad palette in `train_palette_rgba`,Lloyd split-
+  on-empty redistributes dupes to high-SSE clusters。**04-portrait
+  SSIM 83.06 → 87.99**(beats TinyPNG by +2.13);03-wikipedia bit-
+  exact 100;07-product +1.86;corpus 0.865× → 0.912× tinypng(+5.5%
+  size)but **7/7 fixtures now beat TinyPNG SSIM** → [03l](03l-palette-pad-split.md)
+  - Diagnostic via PNG chunk-walker python:`PLTE 342B = 114 colors`
+    finding identifies palette-limited not algorithm-limited
+  - Methodology: `portrait_deep.rs` n_colors×dither sweep first
+    showed n_colors knob had no effect → pointed at imagequant fixed
+    output
+
 ### Cycle 6 — default-flip final push(0.5.23-0.5.24)
 - 0.5.23 Pass 1-4:gap decomposition research + Level::Best always(temporarily)
 - 0.5.24 Pass 5-6 reversion:chain×iter sensitivity sweep showed

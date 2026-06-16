@@ -287,6 +287,31 @@ pub fn refine_palette_kmeans(
             count[j] += 1;
         }
         let mut max_move = 0.0f32;
+        // Phase 2.7: track per-cluster mean squared OKLab+alpha error
+        // (within-cluster variance) so we can split high-error clusters
+        // into empty slots. Without this, Stone D Lloyd lets clusters
+        // go empty (114/256 effective palette on 04-portrait) which
+        // loses color resolution vs TinyPNG's full 256.
+        let mut sse = vec![0.0f64; k]; // sum of squared errors per cluster
+        for (pi, px) in src_rgba.chunks_exact(4).enumerate() {
+            let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
+            let pa = px[3];
+            let j = assigned[pi] as usize;
+            if count[j] == 0 { continue; }
+            let nc = count[j] as f64;
+            let mean_l = (sum_l[j] / nc) as f32;
+            let mean_a = (sum_a[j] / nc) as f32;
+            let mean_b = (sum_b[j] / nc) as f32;
+            let mean_alpha = (sum_alpha[j] as f64 / nc).round() as u8;
+            let dl = (p.l - mean_l) as f64;
+            let da = (p.a - mean_a) as f64;
+            let db = (p.b - mean_b) as f64;
+            let dpa = (pa as i32 - mean_alpha as i32) as f64 * ALPHA_SCALE as f64;
+            sse[j] += dl * dl + da * da + db * db + dpa * dpa;
+        }
+
+        let mut empty_slots: Vec<usize> = (0..k).filter(|&j| count[j] == 0).collect();
+
         for j in 0..k {
             if count[j] == 0 {
                 continue;
@@ -312,6 +337,46 @@ pub fn refine_palette_kmeans(
             palette[j] = Oklab { l: new_l, a: new_a, b: new_b };
             alpha[j] = new_alpha;
         }
+
+        // Phase 2.7 split-on-empty: for each empty slot, find highest-
+        // SSE cluster and split its centroid via slight perturbation.
+        // Next iteration's assign will distribute pixels to the new
+        // centroid based on argmin proximity.
+        if !empty_slots.is_empty() {
+            let mut sse_ordered: Vec<(usize, f64)> =
+                (0..k).filter(|&j| count[j] > 0).map(|j| (j, sse[j])).collect();
+            sse_ordered.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            for empty_j in empty_slots.drain(..) {
+                if let Some(&(donor, donor_sse)) = sse_ordered.first() {
+                    if donor_sse <= 0.0 { break; }
+                    // Perturb donor centroid +ε in OKLab; place empty
+                    // at donor−ε. Next iter argmin will partition pixels
+                    // around the original centroid into the two halves.
+                    let donor_c = palette[donor];
+                    let donor_a = alpha[donor];
+                    // Use sqrt(sse/count) as perturbation magnitude scale.
+                    let sigma = (donor_sse / count[donor] as f64).sqrt().max(0.001) as f32;
+                    palette[empty_j] = Oklab {
+                        l: donor_c.l - sigma * 0.5,
+                        a: donor_c.a,
+                        b: donor_c.b,
+                    };
+                    alpha[empty_j] = donor_a;
+                    palette[donor] = Oklab {
+                        l: donor_c.l + sigma * 0.5,
+                        a: donor_c.a,
+                        b: donor_c.b,
+                    };
+                    // Force a non-trivial max_move so loop doesn't exit
+                    // early after a split.
+                    max_move = max_move.max(EPS_SQ * 4.0);
+                    // Remove donor from candidate list (so next empty
+                    // slot picks the next-highest-SSE cluster).
+                    sse_ordered.remove(0);
+                }
+            }
+        }
+
         if max_move < EPS_SQ {
             break;
         }
@@ -369,6 +434,20 @@ pub fn train_palette_rgba(
     if oklab.len() > n {
         oklab.truncate(n);
         alpha.truncate(n);
+    }
+    // Phase 2.7: pad palette to `n` entries via duplication so Stone D
+    // split-on-empty has the full slot budget to work with. imagequant
+    // returns fewer than `n` when its quality threshold (95) is hit
+    // early on easy inputs (e.g. 04-portrait returns ~ 100-200 entries
+    // out of 256). Without padding, Lloyd refinement only operates on
+    // imagequant's output count and palette stays small. Pad entries
+    // are duplicates of existing entries; Lloyd will immediately split
+    // them via the split-on-empty heuristic in `refine_palette_kmeans`.
+    if let (Some(&first_ok), Some(&first_a)) = (oklab.first(), alpha.first()) {
+        while oklab.len() < n {
+            oklab.push(first_ok);
+            alpha.push(first_a);
+        }
     }
     Ok((oklab, alpha))
 }
