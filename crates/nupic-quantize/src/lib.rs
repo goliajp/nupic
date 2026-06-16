@@ -390,22 +390,29 @@ pub fn apply_palette(
     (indices, palette_srgb)
 }
 
-/// Auto-pick Stone E dither strength from a cheap content classifier.
+/// Auto-pick Stone E dither strength from a tiered content classifier.
 ///
-/// Returns:
-/// - `0.25` for fully-opaque large rasters
-///   (`opaque_ratio ≥ 0.95 && n_pixels ≥ 200_000`):light dither,
-///   strict-win on photo fixtures (+0.3..+0.9 SSIMULACRA2),
-///   neutral / marginal-positive on UI screenshots (+0.1).
-/// - `0.0` otherwise (transparent / small logos):skip dither —
-///   Stone D's no-dither path already wins on those.
+/// **3-tier decision tree**:
 ///
-/// `0.25` is chosen over `0.5` after dogfood revealed UI text
-/// screenshots (e.g. testflight) classify as "fully-opaque large"
-/// alongside photos but mild regression at `0.5` (-0.13 SSIM).
-/// `0.25` keeps that case in the positive,gives ~half the photo
-/// benefit at half the size cost。Users wanting full photo benefit
-/// can pass `--dither 0.5` explicitly。
+/// 1. `opaque_ratio < 0.95 || n_pixels < 200_000`:return `0.0`
+///    (small / transparent — Stone D no-dither path already wins,see
+///    02-pluto / 03-wikipedia-logo Pareto frontier in 03f essay).
+/// 2. `mean_run > 2.0`:return `0.25`(UI screenshot / logo class
+///    — strength 0.5 over-dithers,see testflight regression on
+///    `03e-stone-e-fs-dither.md` §3).
+/// 3. otherwise:return `0.5`(photo class — Pareto-optimal point in
+///    03f sweep on 04/05/06/07 photo fixtures).
+///
+/// `mean_run` = mean length of consecutive RGB-identical pixel runs
+/// in row-major order. Photo content rarely has 2 adjacent identical
+/// pixels (skin / sky / landscape gradients);UI screenshots have
+/// long flat-color runs (text backgrounds, solid panels).
+///
+/// 03f Pareto sweep showed perfect separation on the 7-fixture + 2
+/// dogfood corpus:
+/// - Photos: mean_run ∈ [1.10, 1.36] → tier-3 (0.5)
+/// - UI: mean_run ∈ [7.89, 94.53] → tier-2 (0.25)
+/// - Logos / transparent: tier-1 (0.0)
 #[must_use]
 pub fn classify_for_auto_dither(src_rgba: &[u8]) -> f32 {
     let mut n_opaque = 0usize;
@@ -420,10 +427,40 @@ pub fn classify_for_auto_dither(src_rgba: &[u8]) -> f32 {
         return 0.0;
     }
     let opaque_ratio = n_opaque as f64 / n_total as f64;
-    if opaque_ratio >= 0.95 && n_total >= 200_000 {
+    if opaque_ratio < 0.95 || n_total < 200_000 {
+        return 0.0;
+    }
+    // tier-2 vs tier-3: mean-run-length signal.
+    let mut runs: u64 = 0;
+    let mut total_runs: u64 = 0;
+    let mut prev: [u8; 3] = [0, 0, 0];
+    let mut cur_run: u64 = 0;
+    for (i, p) in src_rgba.chunks_exact(4).enumerate() {
+        let rgb = [p[0], p[1], p[2]];
+        if i > 0 && rgb == prev {
+            cur_run += 1;
+        } else {
+            if cur_run > 0 {
+                runs += cur_run;
+                total_runs += 1;
+            }
+            cur_run = 1;
+        }
+        prev = rgb;
+    }
+    if cur_run > 0 {
+        runs += cur_run;
+        total_runs += 1;
+    }
+    let mean_run = if total_runs == 0 {
+        1.0
+    } else {
+        runs as f64 / total_runs as f64
+    };
+    if mean_run > 2.0 {
         0.25
     } else {
-        0.0
+        0.5
     }
 }
 
