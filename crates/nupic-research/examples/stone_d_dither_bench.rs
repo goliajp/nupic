@@ -309,7 +309,7 @@ fn main() -> Result<()> {
         ("07-photo-product.png", "assets/png-bench/inputs"),
     ];
 
-    let iter_sweep = [1usize, 3, 5, 10];
+    let iter_sweep = [5usize, 10, 20, 50];
 
     for &n_iters in &iter_sweep {
         println!("\n========== Variant E: k-means n_iters = {} ==========", n_iters);

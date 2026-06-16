@@ -133,11 +133,23 @@ pub fn quantize(
 
 /// Default Lloyd's k-means refinement iteration count for Stone D
 /// palette polish. Empirical sweet spot from
-/// `docs/research/png/03d-stone-d-design.md` §5 bench: at 5 iterations,
-/// SSIMULACRA2 +24.68 pts avg and size −0.6% across the 7-fixture
-/// corpus;higher iter counts give marginal further improvement at
-/// linear wall-clock cost.
-pub const DEFAULT_REFINE_ITERS: usize = 5;
+/// `docs/research/png/03d-stone-d-design.md` §5 / §5.2 bench:
+///
+/// | iters | corpus size | corpus SSIM avg | 04-portrait Δ |
+/// |---|---|---|---|
+/// | 5 | -14.0 KB | +24.68 | +0.49 |
+/// | 10 | -20.9 KB | +24.63 | +0.54 |
+/// | **20** | **-19.8 KB** | **+24.82** | **+1.15** |
+/// | 50 | -22.5 KB | +25.89 | +1.26 |
+///
+/// At 20 iterations every fixture strictly improves over baseline +
+/// over iter=5; 04-portrait gets +1.15 pt and 02-pluto starts catching
+/// up (full convergence needs 50 iters for 02 specifically). Choosing
+/// 20 as default trades 4× wall-clock for measurable quality on
+/// every fixture; callers who want full convergence on the harder
+/// fixtures (02-pluto +7 pt at iter=50) can call
+/// `quantize_with(..., refine_iters=50)` explicitly.
+pub const DEFAULT_REFINE_ITERS: usize = 20;
 
 /// Full quantization with explicit Stone D refinement iteration count.
 /// `refine_iters = 0` reproduces phase 2.1 behaviour (no refinement).
@@ -186,7 +198,7 @@ pub fn refine_palette_kmeans(
     palette_alpha: &[u8],
     n_iters: usize,
 ) -> (Vec<Oklab>, Vec<u8>) {
-    use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+    use rayon::iter::ParallelIterator;
     use rayon::slice::ParallelSlice;
 
     let n_pixels = (width as usize) * (height as usize);
