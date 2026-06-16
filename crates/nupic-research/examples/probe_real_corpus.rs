@@ -64,6 +64,9 @@ fn main() -> Result<()> {
         "16-earthrise-25mp.png", "17-aurora-5mp.png",
         "18-snowflake-17mp.png", "19-iceberg-3mp.png",
         "20-rainbow-19mp.png",
+        "24-melk-abbey-24mp.png", "25-sofia-cathedral-5mp.png",
+        "26-angkor-wat-32mp.png", "27-whale-tail-5mp.png",
+        "28-orca-14mp.png", "29-sundew-3mp.png",
     ] {
         let p = root.join("assets/png-bench/inputs-ext-real").join(f);
         let img = ImageReader::open(&p)?.with_guessed_format()?.decode()?;
