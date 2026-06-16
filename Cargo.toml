@@ -19,7 +19,7 @@ version = "1"
 version = "1"
 
 [workspace.package]
-version = "0.5.14"
+version = "0.5.15"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"

@@ -91,10 +91,13 @@ fn output_deterministic() {
 /// the `quantize` one-shot helper.
 #[test]
 fn apply_palette_matches_quantize() {
+    // Stone D ships refine_iters=5 as `quantize()` default, so the
+    // pipeline-equivalence contract is checked against `quantize_with(
+    // ..., refine_iters=0)` which reproduces phase 2.1 behaviour.
     let img = gradient_rgba(60, 40);
     let palette = train_palette(&img, 60, 40, 128).unwrap();
     let (idx_apply, pal_apply) = apply_palette(&img, 60, 40, &palette);
-    let q = quantize(&img, 60, 40, 128).unwrap();
+    let q = nupic_quantize::quantize_with(&img, 60, 40, 128, 0).unwrap();
     assert_eq!(idx_apply, q.indices);
     assert_eq!(pal_apply.len(), q.palette_srgb.len());
 }

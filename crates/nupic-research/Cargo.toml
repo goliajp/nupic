@@ -20,6 +20,7 @@ nupic-quantize = { path = "../nupic-quantize" }
 nupic-bits = { path = "../nupic-bits" }
 nupic-deflate = { path = "../nupic-deflate" }
 nupic-png = { path = "../nupic-png" }
+imgref = { workspace = true }
 crc32fast = { workspace = true }
 adler32 = { workspace = true }
 flate2 = "1"

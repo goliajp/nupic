@@ -67,8 +67,17 @@ pub fn quantize_indexed_png(
     height: u32,
     opts: QuantizeOpts,
 ) -> Result<Vec<u8>, QuantizeError> {
-    let (palette_oklab, palette_alpha) =
+    let (mut palette_oklab, mut palette_alpha) =
         train_palette_rgba(src_rgba, width, height, opts.n_colors)?;
+    // Stone D: palette refinement via Lloyd's k-means.
+    (palette_oklab, palette_alpha) = refine_palette_kmeans(
+        src_rgba,
+        width,
+        height,
+        &palette_oklab,
+        &palette_alpha,
+        DEFAULT_REFINE_ITERS,
+    );
     let (indices, palette_srgb) =
         apply_palette_rgba(src_rgba, width, height, &palette_oklab, &palette_alpha);
     let trns_opt = if palette_alpha.iter().all(|&a| a == 255) {
@@ -103,19 +112,167 @@ pub struct QuantizedImage {
 }
 
 /// Full quantization: train palette via imagequant median-cut(RGBA-
-/// aware),then apply it via OKLab+alpha argmin (no dither). Phase 2.1:
-/// preserves source alpha through the palette so the resulting indexed
-/// PNG can carry a `tRNS` chunk.
+/// aware),Stone D Lloyd's k-means refinement (5 iterations default),
+/// then apply via OKLab+alpha argmin (no dither). Stone D bench shows
+/// strict size + SSIMULACRA2 win on all 7 corpus fixtures vs no-
+/// refinement (avg +24.68 SSIM, -0.6% size at 5 iters).
 pub fn quantize(
     src_rgba: &[u8],
     width: u32,
     height: u32,
     n_colors: usize,
 ) -> Result<QuantizedImage, QuantizeError> {
-    let (palette_oklab, palette_alpha) = train_palette_rgba(src_rgba, width, height, n_colors)?;
+    quantize_with(
+        src_rgba,
+        width,
+        height,
+        n_colors,
+        DEFAULT_REFINE_ITERS,
+    )
+}
+
+/// Default Lloyd's k-means refinement iteration count for Stone D
+/// palette polish. Empirical sweet spot from
+/// `docs/research/png/03d-stone-d-design.md` §5 bench: at 5 iterations,
+/// SSIMULACRA2 +24.68 pts avg and size −0.6% across the 7-fixture
+/// corpus;higher iter counts give marginal further improvement at
+/// linear wall-clock cost.
+pub const DEFAULT_REFINE_ITERS: usize = 5;
+
+/// Full quantization with explicit Stone D refinement iteration count.
+/// `refine_iters = 0` reproduces phase 2.1 behaviour (no refinement).
+pub fn quantize_with(
+    src_rgba: &[u8],
+    width: u32,
+    height: u32,
+    n_colors: usize,
+    refine_iters: usize,
+) -> Result<QuantizedImage, QuantizeError> {
+    let (mut palette_oklab, mut palette_alpha) =
+        train_palette_rgba(src_rgba, width, height, n_colors)?;
+    if refine_iters > 0 {
+        (palette_oklab, palette_alpha) = refine_palette_kmeans(
+            src_rgba,
+            width,
+            height,
+            &palette_oklab,
+            &palette_alpha,
+            refine_iters,
+        );
+    }
     let (indices, palette_srgb) =
         apply_palette_rgba(src_rgba, width, height, &palette_oklab, &palette_alpha);
     Ok(QuantizedImage { indices, palette_srgb, palette_alpha })
+}
+
+/// **Stone D**: Lloyd's k-means refinement of the OKLab+alpha palette,
+/// starting from imagequant's median-cut centroids.
+///
+/// Each iteration: (1) assign every pixel to its closest palette entry
+/// via the 4-D OKLab+alpha argmin (same metric as `apply_palette_rgba`);
+/// (2) recompute every cluster's mean OKLab and mean alpha;
+/// (3) replace each palette entry with its cluster mean. Empty
+/// clusters keep their previous centroid. Loop exits early if no
+/// centroid moves more than `EPS` (4-D OKLab+alpha L2 distance).
+///
+/// Bench on 7-fixture corpus(see `docs/research/png/03d-stone-d-design.md`):
+/// avg +24.68 SSIMULACRA2 at 5 iterations, -0.6% size — strict win.
+#[must_use]
+pub fn refine_palette_kmeans(
+    src_rgba: &[u8],
+    width: u32,
+    height: u32,
+    palette_oklab: &[Oklab],
+    palette_alpha: &[u8],
+    n_iters: usize,
+) -> (Vec<Oklab>, Vec<u8>) {
+    use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+    use rayon::slice::ParallelSlice;
+
+    let n_pixels = (width as usize) * (height as usize);
+    assert_eq!(src_rgba.len(), n_pixels * 4);
+    let k = palette_oklab.len();
+    const ALPHA_WEIGHT: f32 = 2.0;
+    const ALPHA_SCALE: f32 = ALPHA_WEIGHT / 255.0;
+    const EPS_SQ: f32 = 0.0005 * 0.0005;
+
+    let mut palette = palette_oklab.to_vec();
+    let mut alpha = palette_alpha.to_vec();
+
+    for _ in 0..n_iters {
+        // Parallel per-pixel assign + per-thread partial reductions.
+        let assigned: Vec<u8> = src_rgba
+            .par_chunks_exact(4)
+            .map(|px| {
+                let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
+                let pa = px[3];
+                let mut best_j = 0usize;
+                let mut best_d2 = f32::INFINITY;
+                for j in 0..k {
+                    let pj = palette[j];
+                    let dl = p.l - pj.l;
+                    let da = p.a - pj.a;
+                    let db = p.b - pj.b;
+                    let d_alpha = (pa as i32 - alpha[j] as i32) as f32 * ALPHA_SCALE;
+                    let d2 = dl.mul_add(
+                        dl,
+                        da.mul_add(da, db.mul_add(db, d_alpha * d_alpha)),
+                    );
+                    if d2 < best_d2 {
+                        best_d2 = d2;
+                        best_j = j;
+                    }
+                }
+                best_j as u8
+            })
+            .collect();
+
+        // Sequential accumulation (small enough to not need parallel reduce).
+        let mut sum_l = vec![0.0f64; k];
+        let mut sum_a = vec![0.0f64; k];
+        let mut sum_b = vec![0.0f64; k];
+        let mut sum_alpha = vec![0u64; k];
+        let mut count = vec![0u64; k];
+        for (pi, px) in src_rgba.chunks_exact(4).enumerate() {
+            let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
+            let j = assigned[pi] as usize;
+            sum_l[j] += p.l as f64;
+            sum_a[j] += p.a as f64;
+            sum_b[j] += p.b as f64;
+            sum_alpha[j] += px[3] as u64;
+            count[j] += 1;
+        }
+        let mut max_move = 0.0f32;
+        for j in 0..k {
+            if count[j] == 0 {
+                continue;
+            }
+            let nc = count[j] as f64;
+            let new_l = (sum_l[j] / nc) as f32;
+            let new_a = (sum_a[j] / nc) as f32;
+            let new_b = (sum_b[j] / nc) as f32;
+            let new_alpha = (sum_alpha[j] as f64 / nc).round() as u8;
+            let old = palette[j];
+            let dl = new_l - old.l;
+            let da = new_a - old.a;
+            let db = new_b - old.b;
+            let d_alpha =
+                (new_alpha as i32 - alpha[j] as i32) as f32 * ALPHA_SCALE;
+            let move_sq = dl.mul_add(
+                dl,
+                da.mul_add(da, db.mul_add(db, d_alpha * d_alpha)),
+            );
+            if move_sq > max_move {
+                max_move = move_sq;
+            }
+            palette[j] = Oklab { l: new_l, a: new_a, b: new_b };
+            alpha[j] = new_alpha;
+        }
+        if max_move < EPS_SQ {
+            break;
+        }
+    }
+    (palette, alpha)
 }
 
 /// Train palette: imagequant median-cut → convert to OKLab. The
