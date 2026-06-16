@@ -72,6 +72,11 @@
   without affecting fully-transparent UI panels(< 0.5 opaque)
   → essay TODO 03m
 - Dogfood verify Cycle 7 Stone D pad+split on testflight:**SSIM 84.72 → 89.64**(+4.92);vantage unchanged
+- 0.5.29 Pass 3 fix:`--use-nupic-png` Path B 没接 `dither_strength`
+  (uniform-matrix bench 发现 B_auto = B_off)。Add `quantize_with_dither`
+  API,wire `encode_png_stone_c_nupic` to pass `opts.dither_strength`。
+  Now Path B mirrors Path A's SSIM gains on dither (02 +0.78,04 +0.87,
+  05 +5.36) at corresponding size cost。
 
 ### Cycle 7 — palette ceiling close(0.5.25+)
 - 0.5.25 Stone D **palette pad + split-on-empty**:imagequant returns

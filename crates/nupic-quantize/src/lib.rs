@@ -187,7 +187,69 @@ pub const DEFAULT_REFINE_ITERS: usize = 100;
 
 /// Full quantization with explicit Stone D refinement iteration count.
 /// `refine_iters = 0` reproduces phase 2.1 behaviour (no refinement).
+/// Calls [`quantize_with_dither`] internally with `dither_strength = 0.0`.
 pub fn quantize_with(
+    src_rgba: &[u8],
+    width: u32,
+    height: u32,
+    n_colors: usize,
+    refine_iters: usize,
+) -> Result<QuantizedImage, QuantizeError> {
+    quantize_with_dither(src_rgba, width, height, n_colors, refine_iters, 0.0)
+}
+
+/// Full quantization with all knobs:Stone D refine iterations + Stone E
+/// FS dither strength (NaN = auto-classify via `classify_for_auto_dither`).
+/// This is what `nupic-core` / `nupic-cli` route through to expose the
+/// `--dither auto` flag on `--use-nupic-png` path uniformly with the
+/// default Path A oxipng pipeline。
+pub fn quantize_with_dither(
+    src_rgba: &[u8],
+    width: u32,
+    height: u32,
+    n_colors: usize,
+    refine_iters: usize,
+    dither_strength: f32,
+) -> Result<QuantizedImage, QuantizeError> {
+    let (mut palette_oklab, mut palette_alpha) =
+        train_palette_rgba(src_rgba, width, height, n_colors)?;
+    if refine_iters > 0 {
+        (palette_oklab, palette_alpha) = refine_palette_kmeans(
+            src_rgba,
+            width,
+            height,
+            &palette_oklab,
+            &palette_alpha,
+            refine_iters,
+        );
+    }
+    let resolved_strength = if dither_strength.is_nan() {
+        classify_for_auto_dither(src_rgba)
+    } else {
+        dither_strength
+    };
+    let (indices, palette_srgb) = if resolved_strength > 0.0 {
+        apply_palette_rgba_fs_dither(
+            src_rgba,
+            width,
+            height,
+            &palette_oklab,
+            &palette_alpha,
+            resolved_strength,
+        )
+    } else {
+        apply_palette_rgba(src_rgba, width, height, &palette_oklab, &palette_alpha)
+    };
+    let (indices, palette_srgb, palette_alpha) =
+        compact_palette(indices, palette_srgb, palette_alpha);
+    Ok(QuantizedImage { indices, palette_srgb, palette_alpha })
+}
+
+/// (Original `quantize_with` body — kept inline for legacy callers that
+/// still construct via the explicit non-dither helper below. Removed in
+/// favour of `quantize_with_dither`.)
+#[doc(hidden)]
+fn _quantize_with_legacy_inline(
     src_rgba: &[u8],
     width: u32,
     height: u32,

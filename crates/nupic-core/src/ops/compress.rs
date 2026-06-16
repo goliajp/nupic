@@ -215,12 +215,18 @@ fn encode_png_stone_c(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
 /// PNG files vs the `oxipng` path as of 0.5.10 (cross-fixture average
 /// 1.10× with `FilterStrategy::DeflateAware`); will close as
 /// `nupic-png` filter polish lands in 0.6.x.
-fn encode_png_stone_c_nupic(img: &Image, _opts: &CompressOpts) -> Result<Vec<u8>> {
+fn encode_png_stone_c_nupic(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     let rgba = img.inner().to_rgba8();
     let (w, h) = (rgba.width(), rgba.height());
     let raw = rgba.into_raw();
-    let qi = nupic_quantize::quantize(&raw, w, h, 256)
-        .map_err(|e| Error::Codec(Box::new(e)))?;
+    // Path B respects CompressOpts::dither_strength uniformly with Path A
+    // (was a Cycle 8 dogfood bug: B_auto == B_off because nupic_quantize::
+    // quantize doesn't take dither). Use quantize_with_dither.
+    let qi = nupic_quantize::quantize_with_dither(
+        &raw, w, h, 256,
+        nupic_quantize::DEFAULT_REFINE_ITERS,
+        opts.dither_strength,
+    ).map_err(|e| Error::Codec(Box::new(e)))?;
     let trns = if qi.palette_alpha.iter().all(|&a| a == 255) {
         None
     } else {
