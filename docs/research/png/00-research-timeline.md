@@ -61,6 +61,17 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 15 — Lloyd's split-on-empty force-iter cap(v0.5.32,ship)
+- Instrumented Lloyd's iter count per fixture(NUPIC_DEBUG_LLOYD env):
+  03-wiki-logo runs all **100** iters,others 22-67
+- Root cause:logo has < 50 unique colors;split-on-empty perpetually
+  finds empty slots and PERTURBS centroids — that perturbation gets
+  counted as "movement" in next iter's max_move,blocking EPS_SQ exit
+- Fix:skip split-on-empty block entirely after `SPLIT_FORCE_ITERS=30`;
+  let `compact_palette` post-process drop unused slots
+- 03 iter count:**100 → 32**(-68%);7-fixture outputs **bit-exact
+  identical**
+
 ### Cycle 14 — Lloyd's k-means perf -26%(v0.5.31,ship)
 - Profile(`cycle14_perf_breakdown`):Lloyd's refine 100 iter dominates
   82.5% of 05-mountain encode time(2270 / 2751 ms)

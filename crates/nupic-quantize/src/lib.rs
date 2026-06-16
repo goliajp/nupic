@@ -326,7 +326,14 @@ pub fn refine_palette_kmeans(
 
     // Pre-allocate assigned buffer; reused each iter.
     let mut assigned: Vec<u8> = vec![0u8; pixels_oklab_alpha.len()];
-    for _ in 0..n_iters {
+    // Phase 3.1: cap split-on-empty force-iter contribution to early
+    // iters. On simple inputs (logos, < 50 unique colors) split-on-empty
+    // perpetually finds empty slots and force-iters Lloyd's to the
+    // n_iters cap even though genuine centroid movement converged
+    // after 1-2 iters. Limit force-iter to first SPLIT_FORCE_ITERS;
+    // after that, EPS_SQ governs convergence regardless of split.
+    const SPLIT_FORCE_ITERS: usize = 30;
+    for iter_idx in 0..n_iters {
         use rayon::iter::IndexedParallelIterator;
         use rayon::slice::ParallelSliceMut;
         // Parallel per-pixel assign over precomputed OKLab pixels.
@@ -437,7 +444,16 @@ pub fn refine_palette_kmeans(
         // SSE cluster and split its centroid via slight perturbation.
         // Next iteration's assign will distribute pixels to the new
         // centroid based on argmin proximity.
-        if !empty_slots.is_empty() {
+        //
+        // Phase 3.1: skip split entirely after SPLIT_FORCE_ITERS. On
+        // simple inputs (logos, < 50 unique colors) split-on-empty
+        // perpetually finds empty slots and keeps moving centroids
+        // (via the perturbation itself), preventing EPS_SQ convergence
+        // even though no genuine improvement happens. Capping the
+        // split window at SPLIT_FORCE_ITERS lets natural convergence
+        // end Lloyd's; the `compact_palette` step strips unused entries
+        // afterward so output PNG isn't bloated.
+        if !empty_slots.is_empty() && iter_idx < SPLIT_FORCE_ITERS {
             let mut sse_ordered: Vec<(usize, f64)> =
                 (0..k).filter(|&j| count[j] > 0).map(|j| (j, sse[j])).collect();
             sse_ordered.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
