@@ -269,6 +269,7 @@ fn process_variant_e(
         n_colors: 256,
         oxipng_preset: 5,
         strip_metadata: true,
+        dither_strength: 0.0,
     };
     let _ = opts;
     Ok((png_no, png_e))

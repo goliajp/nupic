@@ -198,6 +198,7 @@ fn compress_returns_encoded_size_matching_input() {
             strip_metadata: false,
             effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
         })
         .unwrap();
     assert_eq!(encoded.size, Size::new(50, 50));
@@ -219,6 +220,7 @@ fn png_encode_decode_round_trip_keeps_dimensions() {
             strip_metadata: false,
             effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
         })
         .unwrap();
     let decoded = Image::decode(&encoded.bytes).unwrap();
@@ -235,6 +237,7 @@ fn jpeg_encode_decode_round_trip_keeps_dimensions() {
             strip_metadata: false,
             effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
         })
         .unwrap();
     let decoded = Image::decode(&encoded.bytes).unwrap();
@@ -251,6 +254,7 @@ fn webp_lossless_encode_decode_round_trip_keeps_dimensions() {
             strip_metadata: false,
             effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
         })
         .unwrap();
     let decoded = Image::decode(&encoded.bytes).unwrap();
@@ -441,6 +445,7 @@ fn perceptual_dssim_on_png_produces_valid_output() {
             strip_metadata: false,
             effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
         })
         .unwrap();
     assert_eq!(out.format, Format::Png);
@@ -461,6 +466,7 @@ fn png_auto_smaller_than_lossless_on_complex_image() {
             strip_metadata: false,
             effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
         })
         .unwrap();
     let lossless = img
@@ -470,6 +476,7 @@ fn png_auto_smaller_than_lossless_on_complex_image() {
             strip_metadata: false,
             effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
         })
         .unwrap();
     assert!(
@@ -492,6 +499,7 @@ fn png_lossless_is_visually_identical() {
             strip_metadata: false,
             effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
         })
         .unwrap();
     let decoded = Image::decode(&encoded.bytes).unwrap();
@@ -512,6 +520,7 @@ fn png_quality_low_smaller_than_quality_high() {
             strip_metadata: false,
             effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
         })
         .unwrap();
     let q_high = img
@@ -521,6 +530,7 @@ fn png_quality_low_smaller_than_quality_high() {
             strip_metadata: false,
             effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
         })
         .unwrap();
     assert!(
@@ -545,6 +555,7 @@ fn png_perceptual_dssim_searches_quality_dimension() {
             strip_metadata: false,
             effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
         })
         .unwrap();
     assert!(perceptual.bytes.starts_with(&[0x89, b'P', b'N', b'G']));
@@ -568,6 +579,7 @@ fn perceptual_dssim_on_jpeg_meets_target_or_falls_back() {
             strip_metadata: false,
             effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
         })
         .unwrap();
     assert_eq!(out.format, Format::Jpeg);

@@ -40,6 +40,14 @@ pub struct QuantizeOpts {
     /// Drop sRGB / iCCP / pHYs etc. chunks. Default `true` (matches the
     /// `nupic compress --strip-metadata` behaviour on PNG path).
     pub strip_metadata: bool,
+    /// Stone E Floyd-Steinberg light dither strength (0.0 = no dither,
+    /// 0.5 = light dither sweet spot for photo content, 1.0 = full FS).
+    /// Default 0.0 — opt-in for photo-heavy workloads via
+    /// `--dither <strength>` CLI flag. Trade-off:strength 0.5 adds
+    /// ~7% size for +1~5 SSIMULACRA2 pts on photo fixtures; logos /
+    /// transparent photos see no benefit or slight regression. See
+    /// `docs/research/png/03e-stone-e-fs-dither.md`.
+    pub dither_strength: f32,
 }
 
 impl Default for QuantizeOpts {
@@ -48,6 +56,7 @@ impl Default for QuantizeOpts {
             n_colors: 256,
             oxipng_preset: 5,
             strip_metadata: true,
+            dither_strength: 0.0,
         }
     }
 }
@@ -78,8 +87,18 @@ pub fn quantize_indexed_png(
         &palette_alpha,
         DEFAULT_REFINE_ITERS,
     );
-    let (indices, palette_srgb) =
-        apply_palette_rgba(src_rgba, width, height, &palette_oklab, &palette_alpha);
+    let (indices, palette_srgb) = if opts.dither_strength > 0.0 {
+        apply_palette_rgba_fs_dither(
+            src_rgba,
+            width,
+            height,
+            &palette_oklab,
+            &palette_alpha,
+            opts.dither_strength,
+        )
+    } else {
+        apply_palette_rgba(src_rgba, width, height, &palette_oklab, &palette_alpha)
+    };
     let trns_opt = if palette_alpha.iter().all(|&a| a == 255) {
         None
     } else {
@@ -361,6 +380,107 @@ pub fn apply_palette(
     // behaviour for callers that don't need tRNS.
     let alpha = vec![255u8; palette.len()];
     let (indices, palette_srgb) = apply_palette_rgba(src_rgba, width, height, palette, &alpha);
+    (indices, palette_srgb)
+}
+
+/// Floyd-Steinberg light dither in OKLab+alpha space. `strength`
+/// scales the diffused residual; 0 = no dither (call
+/// [`apply_palette_rgba`] instead), 1 = canonical FS.
+///
+/// Stone E research(`docs/research/png/03e-stone-e-fs-dither.md`)
+/// shows strength 0.5 gives +1~+5 SSIMULACRA2 on photo fixtures at
+/// +2-17% size cost; strength 0.75 still helps photos but at +10%
+/// corpus size; strength 1.0 overshoots (full FS collapses SSIM on
+/// 02-pluto and several others). Photo / non-transparent inputs
+/// benefit most; 02-pluto-class transparent photos and pure-flat
+/// logos see no benefit or slight regression.
+///
+/// Opt-in via `QuantizeOpts::dither_strength > 0.0` / CLI
+/// `--dither <strength>`.
+#[must_use]
+pub fn apply_palette_rgba_fs_dither(
+    src_rgba: &[u8],
+    width: u32,
+    height: u32,
+    palette_oklab: &[Oklab],
+    palette_alpha: &[u8],
+    strength: f32,
+) -> (Vec<u8>, Vec<Rgb<u8>>) {
+    let w = width as usize;
+    let h = height as usize;
+    let n_pixels = w * h;
+    let k = palette_oklab.len();
+    assert_eq!(src_rgba.len(), n_pixels * 4);
+    assert_eq!(palette_alpha.len(), k);
+    const ALPHA_WEIGHT: f32 = 2.0;
+    const ALPHA_SCALE: f32 = ALPHA_WEIGHT / 255.0;
+
+    // Pre-convert all pixels to OKLab + scaled alpha (so diffusion is
+    // dimensionally consistent with the distance metric).
+    let mut pixels: Vec<(f32, f32, f32, f32)> = src_rgba
+        .chunks_exact(4)
+        .map(|px| {
+            let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
+            (p.l, p.a, p.b, px[3] as f32 * ALPHA_SCALE)
+        })
+        .collect();
+
+    let mut indices = vec![0u8; n_pixels];
+    for y in 0..h {
+        for x in 0..w {
+            let idx = y * w + x;
+            let (l, a, b, pa) = pixels[idx];
+
+            let mut best_j = 0usize;
+            let mut best_d2 = f32::INFINITY;
+            for j in 0..k {
+                let pj = palette_oklab[j];
+                let pa_j = palette_alpha[j] as f32 * ALPHA_SCALE;
+                let dl = l - pj.l;
+                let da = a - pj.a;
+                let db = b - pj.b;
+                let dpa = pa - pa_j;
+                let d2 = dl.mul_add(
+                    dl,
+                    da.mul_add(da, db.mul_add(db, dpa * dpa)),
+                );
+                if d2 < best_d2 {
+                    best_d2 = d2;
+                    best_j = j;
+                }
+            }
+            indices[idx] = best_j as u8;
+
+            if strength > 0.0 {
+                let pj = palette_oklab[best_j];
+                let pa_j = palette_alpha[best_j] as f32 * ALPHA_SCALE;
+                let err_l = (l - pj.l) * strength;
+                let err_a = (a - pj.a) * strength;
+                let err_b = (b - pj.b) * strength;
+                let err_pa = (pa - pa_j) * strength;
+                let mut diffuse = |target_idx: usize, weight: f32| {
+                    pixels[target_idx].0 += err_l * weight;
+                    pixels[target_idx].1 += err_a * weight;
+                    pixels[target_idx].2 += err_b * weight;
+                    pixels[target_idx].3 += err_pa * weight;
+                };
+                if x + 1 < w {
+                    diffuse(idx + 1, 7.0 / 16.0);
+                }
+                if y + 1 < h {
+                    if x > 0 {
+                        diffuse((y + 1) * w + x - 1, 3.0 / 16.0);
+                    }
+                    diffuse((y + 1) * w + x, 5.0 / 16.0);
+                    if x + 1 < w {
+                        diffuse((y + 1) * w + x + 1, 1.0 / 16.0);
+                    }
+                }
+            }
+        }
+    }
+    let palette_srgb: Vec<Rgb<u8>> =
+        palette_oklab.iter().map(|c| oklab_to_srgb_u8(*c)).collect();
     (indices, palette_srgb)
 }
 

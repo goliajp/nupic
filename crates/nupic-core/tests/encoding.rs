@@ -17,6 +17,7 @@ fn encode(format: Format, quality: Quality) -> Vec<u8> {
         strip_metadata: false,
         effort: 1,
             use_nupic_png: false,
+            dither_strength: 0.0,
     })
     .expect("encode should succeed")
     .bytes

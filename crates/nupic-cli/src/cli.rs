@@ -321,6 +321,15 @@ pub struct CompressArgs {
     /// average — opt in to A/B compare the integration path.
     #[arg(long, default_value_t = false)]
     pub use_nupic_png: bool,
+
+    /// **Stone E light dither** strength for the indexed PNG path,
+    /// 0.0 (default, no dither — "又小又好" sweet spot for most
+    /// workloads) to 1.0 (canonical Floyd-Steinberg).
+    /// Sweet spot for photo-heavy inputs is ~0.5 (+1~5 SSIMULACRA2 pts,
+    /// +2-17% size on photo fixtures). Logos and pure-flat content
+    /// see no benefit and slight regression.
+    #[arg(long, default_value_t = 0.0)]
+    pub dither: f32,
 }
 
 #[derive(Debug, Args)]

@@ -64,6 +64,12 @@ pub struct CompressOpts {
     /// integration, file size will improve as `nupic-png` polishes
     /// land in 0.6.x.
     pub use_nupic_png: bool,
+    /// Stone E Floyd-Steinberg light dither strength on the indexed
+    /// PNG path. 0.0 (default) = no dither, "又小又好" sweet spot for
+    /// most workloads; 0.5 = light dither for photo-heavy inputs that
+    /// hit Stone D's no-dither plateau on smooth gradients. See
+    /// `docs/research/png/03e-stone-e-fs-dither.md`.
+    pub dither_strength: f32,
 }
 
 impl Default for CompressOpts {
@@ -74,6 +80,7 @@ impl Default for CompressOpts {
             strip_metadata: false,
             effort: 5,
             use_nupic_png: false,
+            dither_strength: 0.0,
         }
     }
 }
@@ -196,6 +203,7 @@ fn encode_png_stone_c(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
         n_colors: 256,
         oxipng_preset: u8::min(opts.effort, 6),
         strip_metadata: opts.strip_metadata,
+        dither_strength: opts.dither_strength,
     };
     nupic_quantize::quantize_indexed_png(&raw, w, h, qopts)
         .map_err(|e| Error::Codec(Box::new(e)))

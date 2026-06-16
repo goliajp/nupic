@@ -34,7 +34,7 @@ fn process(root: &Path, fname: &str) -> Result<(String, usize, usize, usize, usi
     let raw_size = raw.len();
 
     // Path A: current production pipeline.
-    let opts = QuantizeOpts { n_colors: 256, oxipng_preset: 5, strip_metadata: true };
+    let opts = QuantizeOpts { n_colors: 256, oxipng_preset: 5, strip_metadata: true, dither_strength: 0.0 };
     let path_a_png = quantize_indexed_png(&raw, w, h, opts).map_err(|e| anyhow::anyhow!("{e:?}"))?;
     let size_a = path_a_png.len();
 
