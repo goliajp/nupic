@@ -61,6 +61,23 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 27 — real-photo ext corpus + tier-4d high-uniq split(v0.5.39,ship)
+- 用户要求"上网找 8mp photo 验更多 ceiling 信号"
+- 新 fixture(`assets/png-bench/inputs-ext-real/`,public-domain from
+  Wikimedia / NASA):16-earthrise(25 MP)、17-aurora(5.9 MP)、
+  18-snowflake(17.9 MP)、19-iceberg(3 MP)、20-rainbow(19.6 MP)
+- bench 找 ceiling:17 aurora SSIM 63.98(want d=0.7 → 66.22)、
+  20 rainbow 70.23(want d=0.7 → 70.95)、13 very-large 66.52
+  (want d=0.7 → 68.84,Cycle 26 deferred 现可 ship)
+- Signal:**3 fixture 同样**`uniq > 100K AND var < 50`signature。 04
+  (uniq=25K)和 16 earthrise(uniq=43K)是 counterexample(want 0.5
+  peak)。 threshold 50K cleanly split
+- 实装:tier-4 var split 后加 tier-4d branch:`uniq > 50_000 → 0.7`
+- Result:**13 +2.32,17 +2.24,20 +0.72 SSIM**(累 +5.28);原 7-fixture
+  + 其他 7/8 ext-synth 全 bit-exact identical
+- 219 tests 全绿
+- Essay:`03u-cycle27-real-photo-corpus.md`
+
 ### Cycle 26 — ext corpus 13 / 14 finer sweep(research-only,no ship)
 - **11 photo-noisy** peak d=0.7 = SSIM 81.47(current,no change)
 - **13 very-large-photo**(upscaled 05):peak d=0.7 = SSIM 68.84 vs
