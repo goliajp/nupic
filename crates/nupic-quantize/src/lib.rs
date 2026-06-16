@@ -679,8 +679,26 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
     } else {
         runs as f64 / total_runs as f64
     };
+    // Phase 3.6 (Cycle 23): tier-3 needs uniq-color guard. Synthetic
+    // smooth gradients (integer-quantized adjacent colors) trigger
+    // mean_run > 2 with very HIGH uniq count (e.g. 08-gradient-large:
+    // mean_run=6.13, uniq=117K), but they're photo-class content that
+    // needs tier-4 dither, not tier-3. Real UI/logo/text has uniq < 200
+    // (09=5, 10=5, 15=3, 03=129). Threshold uniq ≥ 1000 escapes to
+    // tier-4. Costs one O(N) pass with early-exit at 1000.
     if mean_run > 2.0 {
-        return 0.25; // tier-3: UI screenshot
+        let step_u = if n_total > 1_000_000 { 4 } else { 1 };
+        let mut uniq = std::collections::HashSet::with_capacity(1024);
+        for p in src_rgba.chunks_exact(4).step_by(step_u) {
+            if p[3] != 255 { continue; }
+            let key = (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16);
+            uniq.insert(key);
+            if uniq.len() >= 1000 { break; }
+        }
+        if uniq.len() < 1000 {
+            return 0.25; // genuine tier-3: UI / logo / text
+        }
+        // else fall through to tier-4 (high uniq → photo-class content)
     }
     // tier-4 content split: variance of adjacent-pixel luminance diff
     // distinguishes textured photos (high var, want d=0.7) from smooth

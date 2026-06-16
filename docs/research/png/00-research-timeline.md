@@ -61,6 +61,22 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 23 — extended corpus + tier-3 uniq-color guard(v0.5.37,ship)
+- **新增 8 fixture**(`assets/png-bench/inputs-ext/`):08 gradient-large、
+  09 ui-checker-text、10 comic-flat、11 photo-noisy、12 tiny-icon、
+  13 very-large-photo(8.6 MP)、14 soft-transparent、15 mono-text
+- **Misclass 发现**:08 gradient(mean_run=6.13,uniq=117K)被误为
+  tier-3 UI(d=0.25)→ SSIM 37.72。 sweep 显示 d=0.7 peak SSIM 68
+- **Signal sweep**:UI/logo/text uniq ≤ 129,photo/gradient uniq ≥ 4348。
+  big gap → threshold 1000 cleanly split
+- Fix:tier-3 加 uniq-color guard `mean_run > 2 AND uniq < 1000`,
+  实现 O(N) HashSet + early-exit at 1000
+- 原 7-fixture corpus **bit-exact identical**;ext corpus 仅 08 改变:
+  **+21.26 SSIM(37.72 → 58.98)**,size +174 KB
+- 08 离 peak(d=0.7)仍有 +9 SSIM 余地;Cycle 24+ 候选
+- 219 tests 全绿
+- Essay:`03s-cycle23-tier3-uniq-guard.md`
+
 ### Cycle 22 — 01-transparency-demo dither sweep(research-only)
 - 01 当前 tier-1(opaque_ratio 0.036 → transparency-dominant → d=0)
 - finer dither sweep:每 KB +0.5 SSIM linear,无 sweet spot
