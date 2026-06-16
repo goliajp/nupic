@@ -747,6 +747,11 @@ pub fn apply_palette_rgba_fs_dither(
         })
         .collect();
 
+    // Phase 3.1: precompute palette_alpha_scaled once (was recomputed
+    // per pixel × per centroid: 245M wasted muls for 05-mountain).
+    let palette_alpha_scaled: Vec<f32> = palette_alpha
+        .iter().map(|&a| a as f32 * ALPHA_SCALE).collect();
+
     let mut indices = vec![0u8; n_pixels];
     for y in 0..h {
         for x in 0..w {
@@ -757,7 +762,7 @@ pub fn apply_palette_rgba_fs_dither(
             let mut best_d2 = f32::INFINITY;
             for j in 0..k {
                 let pj = palette_oklab[j];
-                let pa_j = palette_alpha[j] as f32 * ALPHA_SCALE;
+                let pa_j = palette_alpha_scaled[j];
                 let dl = l - pj.l;
                 let da = a - pj.a;
                 let db = b - pj.b;
@@ -775,7 +780,7 @@ pub fn apply_palette_rgba_fs_dither(
 
             if strength > 0.0 {
                 let pj = palette_oklab[best_j];
-                let pa_j = palette_alpha[best_j] as f32 * ALPHA_SCALE;
+                let pa_j = palette_alpha_scaled[best_j];
                 let err_l = (l - pj.l) * strength;
                 let err_a = (a - pj.a) * strength;
                 let err_b = (b - pj.b) * strength;
@@ -863,13 +868,16 @@ pub fn apply_palette_rgba(
     let k = palette_oklab.len();
     const ALPHA_WEIGHT: f32 = 2.0;
     const ALPHA_SCALE: f32 = ALPHA_WEIGHT / 255.0;
+    // Phase 3.1: precompute palette_alpha_scaled once.
+    let palette_alpha_scaled: Vec<f32> = palette_alpha
+        .iter().map(|&a| a as f32 * ALPHA_SCALE).collect();
     let mut indices = vec![0u8; n_pixels];
     src_rgba
         .par_chunks_exact(4)
         .zip(indices.par_chunks_exact_mut(1))
         .for_each(|(px, idx)| {
             let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
-            let pa = px[3];
+            let pa_scaled = px[3] as f32 * ALPHA_SCALE;
             let mut best_j = 0usize;
             let mut best_d2 = f32::INFINITY;
             for j in 0..k {
@@ -877,7 +885,7 @@ pub fn apply_palette_rgba(
                 let dl = p.l - pj.l;
                 let da = p.a - pj.a;
                 let db = p.b - pj.b;
-                let d_alpha = (pa as i32 - palette_alpha[j] as i32) as f32 * ALPHA_SCALE;
+                let d_alpha = pa_scaled - palette_alpha_scaled[j];
                 let d2 = dl.mul_add(dl,
                     da.mul_add(da,
                         db.mul_add(db, d_alpha * d_alpha)));
