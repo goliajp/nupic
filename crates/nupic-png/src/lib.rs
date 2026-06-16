@@ -36,15 +36,21 @@ mod filter;
 
 pub use filter::FilterType;
 
-/// PNG filter-selection strategy. `MinSad` is the cheap libpng-class
-/// default; `DeflateAware` pays a per-row trial-deflate to pick filters
-/// in actual-bit-cost space (5-15% smaller IDAT on natural images,
-/// roughly 5× slower wall-clock).
+/// PNG filter-selection strategy.
+///
+/// - `MinSad` — Heckbert's sum-of-abs heuristic, per-row.
+/// - `DeflateAware` — per-row trial-deflate (5 filters × deflate, pick
+///   smallest by isolated row size).
+/// - `BestOf` — phase 2.2 default. Tries 7 candidates (5 single-filter
+///   + per-row min-SAD + per-row deflate-aware), measures each by
+///   full-stream `Level::Fast` deflate, picks smallest. Captures
+///   cross-row LZ77 context the per-row strategies miss.
 #[derive(Clone, Copy, Debug, Default)]
 pub enum FilterStrategy {
-    #[default]
     MinSad,
     DeflateAware,
+    #[default]
+    BestOf,
 }
 
 /// An 8-bit indexed-color image: palette of up to 256 sRGB colors plus
@@ -118,6 +124,7 @@ pub fn encode_indexed_png_with(img: &IndexedImage, strategy: FilterStrategy) -> 
         FilterStrategy::DeflateAware => {
             filter::filter_image_deflate_aware(img.width, img.height, &img.indices)
         }
+        FilterStrategy::BestOf => filter::filter_image_best_of(img.width, img.height, &img.indices),
     };
     let idat = zlib_compress(&raw_filtered);
     write_chunk(&mut out, b"IDAT", &idat);

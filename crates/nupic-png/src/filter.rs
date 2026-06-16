@@ -23,6 +23,60 @@ pub enum FilterType {
 
 const BPP: usize = 1; // 8-bit indexed → 1 byte per pixel
 
+/// Apply a single PNG filter type to every row. Useful as a
+/// global-baseline candidate for the `BestOf` strategy.
+#[must_use]
+pub fn filter_image_single(width: u32, height: u32, indices: &[u8], ft: FilterType) -> Vec<u8> {
+    let w = width as usize;
+    let h = height as usize;
+    if w == 0 || h == 0 {
+        return Vec::new();
+    }
+    let mut out: Vec<u8> = Vec::with_capacity(h * (1 + w));
+    let mut buf = vec![0u8; w];
+    for y in 0..h {
+        let row = &indices[y * w..(y + 1) * w];
+        let prev_row: &[u8] = if y == 0 { &[] } else { &indices[(y - 1) * w..y * w] };
+        apply_filter(ft, row, prev_row, &mut buf);
+        out.push(ft as u8);
+        out.extend_from_slice(&buf);
+    }
+    out
+}
+
+/// **BestOf**: produce candidate filtered streams for 7 strategies
+/// (5 single-filter + per-row min-SAD + per-row deflate-aware), measure
+/// each via `nupic-deflate Level::Fast` as a cheap size proxy, return
+/// the smallest. Picks up cross-row LZ77 context that per-row
+/// strategies miss — especially valuable on natural-image content
+/// where one global filter dominates the per-row heuristic.
+///
+/// Cost: ~ 7 × (filter + Level::Fast deflate) per image. Final output
+/// re-deflates with `Level::Best` downstream, so the proxy ranking
+/// only needs to be approximately correct.
+#[must_use]
+pub fn filter_image_best_of(width: u32, height: u32, indices: &[u8]) -> Vec<u8> {
+    let mut candidates: Vec<Vec<u8>> = Vec::with_capacity(7);
+    for ft in [
+        FilterType::None,
+        FilterType::Sub,
+        FilterType::Up,
+        FilterType::Average,
+        FilterType::Paeth,
+    ] {
+        candidates.push(filter_image_single(width, height, indices, ft));
+    }
+    candidates.push(filter_image(width, height, indices));
+    candidates.push(filter_image_deflate_aware(width, height, indices));
+
+    candidates
+        .into_iter()
+        .min_by_key(|filtered| {
+            nupic_deflate::deflate_level(filtered, nupic_deflate::Level::Fast).len()
+        })
+        .unwrap_or_default()
+}
+
 /// Choose per-row PNG filter using the **deflate-aware** strategy:
 /// for each row,try all 5 filters,deflate the resulting bytes
 /// independently,pick the one with smallest compressed size. Optimal

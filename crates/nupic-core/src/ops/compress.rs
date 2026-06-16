@@ -225,10 +225,11 @@ fn encode_png_stone_c_nupic(img: &Image, _opts: &CompressOpts) -> Result<Vec<u8>
         indices: qi.indices,
         trns,
     };
-    Ok(nupic_png::encode_indexed_png_with(
-        &png_img,
-        nupic_png::FilterStrategy::DeflateAware,
-    ))
+    // Default `FilterStrategy::BestOf` picks the smallest of 7 candidate
+    // filter strategies (5 single-filter + per-row min-SAD + per-row
+    // deflate-aware). Phase 2.2 closes the corpus gap from 1.10× to
+    // 1.07× oxipng.
+    Ok(nupic_png::encode_indexed_png(&png_img))
 }
 
 fn encode_png_lossless(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {

@@ -76,7 +76,7 @@ fn main() -> Result<()> {
 
     println!(
         "{:<32} {:>10} {:>10} {:>10} {:>10}   {:>6} {:>6}",
-        "fixture", "raw_rgba", "A_oxipng", "B_minsad", "C_dfl_aw", "B/A", "C/A"
+        "fixture", "raw_rgba", "A_oxipng", "B_bestof", "C_dfl_aw", "B/A", "C/A"
     );
     println!("{}", "-".repeat(96));
 
