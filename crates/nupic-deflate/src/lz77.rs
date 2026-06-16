@@ -97,9 +97,42 @@ pub fn deflate_static(data: &[u8]) -> Vec<u8> {
 /// deeper hash-chain search (phase 1.1 semantics) and split-search
 /// over {1, 2, 4, 8} equal-sized token partitions (phase 1.2).
 pub fn deflate_best(data: &[u8]) -> Vec<u8> {
-    let tokens = collect_tokens_iterative(data, ITER_PASSES);
+    let mut tokens = collect_tokens_iterative(data, ITER_PASSES);
 
-    // Find best block partition. Always at least 1 block (no split).
+    // Phase 1.5: per-block iterative refinement — re-run cost-DP within
+    // each block using that block's own Huffman code-lengths as the
+    // cost model. Cross-block LZ77 matches are preserved via a pre-
+    // seeded hash chain. **Cost-checked**: keep the refinement only if
+    // it strictly reduces total encoded bits — guards against the
+    // occasional regression where per-block Huffman fit converges
+    // differently and ends up larger than global (observed on
+    // cargo-lock, −0.7% size loss pre-check vs +0.2% on PNG IDAT
+    // corpus).
+    {
+        let initial_bits;
+        let should_refine;
+        {
+            let (initial_partition, ib) = best_partition(&tokens);
+            initial_bits = ib;
+            should_refine = initial_partition.len() > 1 && data.len() >= ITER_MIN_INPUT;
+            if should_refine {
+                // Build owned snapshot of partition boundaries to avoid
+                // borrowing `tokens` across the refinement call.
+                let owned_partition: Vec<Vec<Token>> =
+                    initial_partition.iter().map(|s| s.to_vec()).collect();
+                drop(initial_partition);
+                let owned_refs: Vec<&[Token]> =
+                    owned_partition.iter().map(|v| v.as_slice()).collect();
+                let refined = refine_tokens_per_block(data, &tokens, &owned_refs);
+                let (_rp, refined_bits) = best_partition(&refined);
+                if refined_bits < initial_bits {
+                    tokens = refined;
+                }
+            }
+        }
+    }
+
+    // Final partition + emission.
     let (partition, multi_bits) = best_partition(&tokens);
 
     // Compare against a whole-call stored fallback. Exact bit count
@@ -686,6 +719,157 @@ fn collect_tokens_iterative(data: &[u8], n_passes: usize) -> Vec<Token> {
         tokens = next;
     }
     tokens
+}
+
+/// Phase 1.5: DP-search for the optimal token sequence inside
+/// `data[byte_start..byte_end]`, with the hash chain **pre-seeded**
+/// from `data[..byte_start]` so cross-block LZ77 matches survive.
+/// Cost model is provided per-block by the caller.
+fn dp_optimal_tokens_window(
+    data: &[u8],
+    byte_start: usize,
+    byte_end: usize,
+    max_chain: usize,
+    lit_lens: &[u8],
+    dist_lens: &[u8],
+) -> Vec<Token> {
+    let block_len = byte_end - byte_start;
+    if block_len == 0 {
+        return Vec::new();
+    }
+
+    // Pre-seed hash chain with data[..byte_start]. Use insert_hash for
+    // every position that has MIN_MATCH lookahead within `data`.
+    let mut hash_head = vec![NIL; HASH_SIZE];
+    let mut hash_prev = vec![NIL; WIN_SIZE];
+    let seed_end = byte_start.min(data.len().saturating_sub(MIN_MATCH - 1));
+    let mut j = 0usize;
+    while j < seed_end {
+        insert_hash(&mut hash_head, &mut hash_prev, data, j);
+        j += 1;
+    }
+
+    // DP arrays span only the block window (not whole input).
+    let mut cost = vec![u32::MAX; block_len + 1];
+    cost[0] = 0;
+    let mut best = vec![(0u16, 0u16); block_len + 1];
+
+    for off in 0..block_len {
+        let i = byte_start + off;
+        if cost[off] == u32::MAX {
+            continue;
+        }
+        // Literal move.
+        let lit_cost = cost[off].saturating_add(u32::from(lit_lens[data[i] as usize]));
+        if lit_cost < cost[off + 1] {
+            cost[off + 1] = lit_cost;
+            best[off + 1] = (1, 0);
+        }
+
+        // Match moves — search hash chain spanning data[0..i]. The
+        // match must fit inside the current block (off + k ≤ block_len);
+        // skip entirely when the block has < MIN_MATCH bytes left to
+        // emit a length-3+ match.
+        let max_extend_in_block = (block_len - off).min(MAX_MATCH);
+        if i + MIN_MATCH <= data.len() && max_extend_in_block >= MIN_MATCH {
+            let h = hash3(&data[i..]);
+            let head = hash_head[h];
+            let min_pos = i.saturating_sub(WIN_SIZE);
+            let mut chain_pos = head;
+            let mut depth = 0;
+            while chain_pos != NIL && (chain_pos as usize) >= min_pos && depth < max_chain {
+                depth += 1;
+                let cp = chain_pos as usize;
+                if data[cp] == data[i]
+                    && data[cp + 1] == data[i + 1]
+                    && data[cp + 2] == data[i + 2]
+                {
+                    let mut k = 3usize;
+                    while k < max_extend_in_block && data[cp + k] == data[i + k] {
+                        k += 1;
+                    }
+                    let dist = i - cp;
+                    let match_cost = cost[off].saturating_add(cost_of_match(
+                        k as u16,
+                        dist as u16,
+                        lit_lens,
+                        dist_lens,
+                    ));
+                    let target_off = off + k;
+                    if match_cost < cost[target_off] {
+                        cost[target_off] = match_cost;
+                        best[target_off] = (k as u16, dist as u16);
+                    }
+                }
+                let next = hash_prev[(chain_pos as usize) % WIN_SIZE];
+                if next == NIL || next >= chain_pos {
+                    break;
+                }
+                chain_pos = next;
+            }
+            insert_hash(&mut hash_head, &mut hash_prev, data, i);
+        }
+    }
+
+    // Reconstruct tokens.
+    let mut rev: Vec<Token> = Vec::new();
+    let mut pos = block_len;
+    while pos > 0 {
+        let (len, dist) = best[pos];
+        if dist == 0 {
+            rev.push(Token::Literal(data[byte_start + pos - 1]));
+            pos -= 1;
+        } else {
+            rev.push(Token::Match { length: len, distance: dist });
+            pos -= len as usize;
+        }
+    }
+    rev.reverse();
+    rev
+}
+
+/// Phase 1.5 outer loop: pick partition once via existing iterative,
+/// then re-run cost-DP **per block** using each block's own Huffman
+/// code-lengths fitted to that block's token frequencies. Hash chain
+/// spans the whole input so cross-block LZ77 matches survive.
+///
+/// `block_lens` records the byte length of each block (cumulative
+/// start positions are derived by walking).
+fn refine_tokens_per_block(
+    data: &[u8],
+    tokens: &[Token],
+    partition: &[&[Token]],
+) -> Vec<Token> {
+    // Compute byte boundary per block.
+    let mut block_byte_ends: Vec<usize> = Vec::with_capacity(partition.len() + 1);
+    block_byte_ends.push(0);
+    let mut cumulative_bytes = 0usize;
+    for block in partition {
+        for &t in *block {
+            match t {
+                Token::Literal(_) => cumulative_bytes += 1,
+                Token::Match { length, .. } => cumulative_bytes += length as usize,
+            }
+        }
+        block_byte_ends.push(cumulative_bytes);
+    }
+    debug_assert_eq!(*block_byte_ends.last().unwrap(), data.len(),
+        "partition byte coverage doesn't match input length");
+
+    let _ = tokens; // initial tokens informed `partition`; not used directly here
+
+    let mut refined: Vec<Token> = Vec::with_capacity(data.len() / 4);
+    for (block_idx, block_tokens) in partition.iter().enumerate() {
+        let byte_start = block_byte_ends[block_idx];
+        let byte_end = block_byte_ends[block_idx + 1];
+        // Block-local Huffman from this block's current tokens.
+        let (lit_lens, dist_lens) = cost_lens_from_tokens(block_tokens);
+        let block_refined = dp_optimal_tokens_window(
+            data, byte_start, byte_end, ITER_CHAIN, &lit_lens, &dist_lens,
+        );
+        refined.extend(block_refined);
+    }
+    refined
 }
 
 #[inline]
