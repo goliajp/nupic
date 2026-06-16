@@ -157,25 +157,31 @@ pub fn quantize(
     )
 }
 
-/// Default Lloyd's k-means refinement iteration count for Stone D
-/// palette polish. Empirical sweet spot from
-/// `docs/research/png/03d-stone-d-design.md` §5 / §5.2 bench:
+/// Default Lloyd's k-means refinement iteration **cap** for Stone D.
+/// EPS-based early-exit handles fast-convergence inputs (03-wikipedia
+/// exits at iter 3); cap of 100 lets slow-convergence inputs (e.g.
+/// 02-pluto reaches its SSIM=79 plateau at iter 46) finish naturally
+/// instead of being cut short. Wall-clock scales with actual iters,
+/// not with the cap.
 ///
-/// | iters | corpus size | corpus SSIM avg | 04-portrait Δ |
-/// |---|---|---|---|
-/// | 5 | -14.0 KB | +24.68 | +0.49 |
-/// | 10 | -20.9 KB | +24.63 | +0.54 |
-/// | **20** | **-19.8 KB** | **+24.82** | **+1.15** |
-/// | 50 | -22.5 KB | +25.89 | +1.26 |
+/// Per-fixture convergence iter count (EPS 0.0005,
+/// `docs/research/png/03g-adaptive-iter.md` Pass 3 bench):
 ///
-/// At 20 iterations every fixture strictly improves over baseline +
-/// over iter=5; 04-portrait gets +1.15 pt and 02-pluto starts catching
-/// up (full convergence needs 50 iters for 02 specifically). Choosing
-/// 20 as default trades 4× wall-clock for measurable quality on
-/// every fixture; callers who want full convergence on the harder
-/// fixtures (02-pluto +7 pt at iter=50) can call
-/// `quantize_with(..., refine_iters=50)` explicitly.
-pub const DEFAULT_REFINE_ITERS: usize = 20;
+/// | fixture | converged_iter |
+/// |---|---|
+/// | 01-transparency | 48 |
+/// | 02-pluto | 46 |
+/// | 03-wikipedia | 3 |
+/// | 04-portrait | 34 |
+/// | 05-mountain | 67 |
+/// | 06-landscape | 48 |
+/// | 07-product | 21 |
+///
+/// Choosing 100 as cap (was 20) gives every fixture room to converge;
+/// 02-pluto SSIM improves +7.4 vs iter=20. Callers wanting fixed iter
+/// count for benchmark reproducibility can call `quantize_with(...)`
+/// with explicit value.
+pub const DEFAULT_REFINE_ITERS: usize = 100;
 
 /// Full quantization with explicit Stone D refinement iteration count.
 /// `refine_iters = 0` reproduces phase 2.1 behaviour (no refinement).
