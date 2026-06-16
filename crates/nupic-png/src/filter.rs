@@ -117,7 +117,11 @@ pub fn filter_image_deflate_aware(width: u32, height: u32, indices: &[u8]) -> Ve
         ] {
             apply_filter(ft, row, prev_row, &mut buf);
             // Use static-Huffman cost as a fast proxy for deflate size.
-            // Caller can swap in actual deflate when accuracy > speed.
+            // Cycle 10 reversion: per-row Level::Best ranking was tested
+            // (commit thread in 03n essay) — uniformly produced larger
+            // output than Level::Fast ranking because per-row deflate
+            // cost (1200-byte rows) doesn't correlate with cross-row
+            // final-stream cost. Stay on Level::Fast as the proxy.
             let size = nupic_deflate::deflate_level(&buf, nupic_deflate::Level::Fast).len();
             if size < best_size {
                 best_size = size;

@@ -61,6 +61,21 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 10 — Path B filter selection deep dive(research-only,no ship)
+- Per-chunk decomp of 04-portrait Path A vs Path B shows IDAT diff
+  110 KB(484 KB vs 594 KB)
+- **oxipng picks per-row Paeth mix(764 Paeth + 36 Sub)**;Path B BestOf
+  picks **all-None**(even though all 6 candidates evaluated via Level::Fast)
+- min-SAD per-row picks 60% Sub / 39% Paeth on 04 — different from oxipng's choice
+- Tested:per-row Level::Best ranking in `filter_image_deflate_aware` →
+  forced DeflateAware path → **uniformly WORSE** than BestOf(04 +22%,
+  01 +33%,02 +19%)。Per-row deflate cost on 1200-byte rows doesn't
+  correlate with cross-row final-stream cost。Reverted。
+- Negative-result finding:**Path B closing oxipng filter-quality gap
+  requires libdeflate-class cross-row deflate context,not just per-row
+  decision**。Future:may need actual streaming-context-aware per-row
+  selection。
+
 ### Cycle 9 — tier-4 fine-strength sweep(research-only,no ship)
 - (research-only) Sweep d ∈ {0.5, 0.6, 0.7, 0.75} on photo fixtures:
   - 04-portrait:peak 0.5(0.6+ slight regress)

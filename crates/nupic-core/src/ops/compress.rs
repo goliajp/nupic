@@ -239,11 +239,10 @@ fn encode_png_stone_c_nupic(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>>
         indices: qi.indices,
         trns,
     };
-    // Default `FilterStrategy::BestOf` picks the smallest of 6 candidate
-    // filter strategies (5 single-filter + per-row min-SAD). Phase 2.3
-    // removed `filter_image_deflate_aware` from the candidate set and
-    // added adaptive Level::Fast fallback on flat-run input — see
-    // `docs/research/png/03i-perf-cliff.md`.
+    // Default BestOf (Cycle 10 forced DeflateAware experiment was
+    // strictly worse — per-row Level::Best on 1200-byte rows didn't
+    // correlate with full-stream cost; oxipng-class quality requires
+    // libdeflate's cross-row deflate context which our impl lacks).
     Ok(nupic_png::encode_indexed_png(&png_img))
 }
 
