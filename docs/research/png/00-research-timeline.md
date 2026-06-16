@@ -61,6 +61,18 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 16 — Lloyd's perf attempts(both negative,research-only)
+- A1:par_chunks + per-thread Acc + reduce → **3× SLOWER**
+  (Acc{9 Vec × 256 × 8B} alloc + reduce 远超 sequential's L1-cache
+  fastpath。sequential accumulate 是 memory-bandwidth-bound,not
+  CPU-bound)
+- A3:pack palette + alpha 进 Vec<(f32; 4)> → noise-bound
+  (both packed/unpacked fit L1,no cache delta)
+- bench tooling 噪声大(1698-3379 ms σ),需 warmup + median
+- 结论:Lloyd's < 10% perf 改进 在当前 bench 测不出来。Cycle 17+
+  pivot 到 measurable signal(quality / coverage)
+- Essay:`03p-cycle16-perf-attempts-negative.md`
+
 ### Cycle 15 — Lloyd's split-on-empty force-iter cap(v0.5.32,ship)
 - Instrumented Lloyd's iter count per fixture(NUPIC_DEBUG_LLOYD env):
   03-wiki-logo runs all **100** iters,others 22-67

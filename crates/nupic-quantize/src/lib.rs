@@ -369,10 +369,13 @@ pub fn refine_palette_kmeans(
 
         // Sequential accumulation over precomputed OKLab pixels.
         // Phase 3.0: also accumulate Σx² in the SAME pass so SSE_j =
-        // Σx² − count × mean² is computable without a second loop.
-        // (Pre-Phase-3.0 ran two O(N) sequential passes per iter — the
-        // sum/count, then a second pass to compute SSE for split-on-
-        // empty. Algebraic identity collapses them into one.)
+        // Σx² − (Σx)² / count is computable without a second loop.
+        //
+        // Cycle 16 NOTE: tried par_chunks + per-thread Acc + reduce,
+        // got 3× SLOWER (Acc{9 Vec × 256 × 8B} alloc + reduce-tree
+        // overhead dwarfed the actual accumulate work). Sequential
+        // single-thread is memory-bandwidth-bound, not CPU-bound; loop
+        // body is < 50 ns/pixel with sum buffers fitting L1.
         let mut sum_l = vec![0.0f64; k];
         let mut sum_a = vec![0.0f64; k];
         let mut sum_b = vec![0.0f64; k];
