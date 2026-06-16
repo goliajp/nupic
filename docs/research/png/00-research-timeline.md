@@ -61,6 +61,20 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 14 — Lloyd's k-means perf -26%(v0.5.31,ship)
+- Profile(`cycle14_perf_breakdown`):Lloyd's refine 100 iter dominates
+  82.5% of 05-mountain encode time(2270 / 2751 ms)
+- Root cause:`srgb_u8_to_oklab` called **3 times per pixel per iter**
+  (assign / sum / SSE)= 288M conversions for 05 × 100 iter
+- Fix 1:precompute OKLab+alpha into `pixels_oklab_alpha` **once**;
+  iter loops read from precomputed vec(960K conversions total)
+- Fix 2:collapse two sequential passes(sum→SSE)into one via
+  algebraic identity `SSE = Σx² − (Σx)²/count`
+- Lloyd's:**2270 → 1669 ms(-26%)**;total encode -21%。 7-fixture
+  outputs **bit-exact identical**(verified;split-on-empty FP ordering
+  preserved)
+- Essay:`03o-cycle14-lloyd-perf.md`
+
 ### Cycle 12-13 — 05 ceiling profile + default policy(research-only,no ship)
 - 05-mountain palette-saturated at 256;Lloyd's converged by iter=100
 - imagequant s=1 corpus sweep:**-1.18 SSIM net** due to 02-pluto

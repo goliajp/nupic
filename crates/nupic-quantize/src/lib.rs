@@ -309,71 +309,100 @@ pub fn refine_palette_kmeans(
     let mut palette = palette_oklab.to_vec();
     let mut alpha = palette_alpha.to_vec();
 
-    for _ in 0..n_iters {
-        // Parallel per-pixel assign + per-thread partial reductions.
-        let assigned: Vec<u8> = src_rgba
-            .par_chunks_exact(4)
-            .map(|px| {
-                let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
-                let pa = px[3];
-                let mut best_j = 0usize;
-                let mut best_d2 = f32::INFINITY;
-                for j in 0..k {
-                    let pj = palette[j];
-                    let dl = p.l - pj.l;
-                    let da = p.a - pj.a;
-                    let db = p.b - pj.b;
-                    let d_alpha = (pa as i32 - alpha[j] as i32) as f32 * ALPHA_SCALE;
-                    let d2 = dl.mul_add(
-                        dl,
-                        da.mul_add(da, db.mul_add(db, d_alpha * d_alpha)),
-                    );
-                    if d2 < best_d2 {
-                        best_d2 = d2;
-                        best_j = j;
-                    }
-                }
-                best_j as u8
-            })
-            .collect();
+    // Phase 3.0: precompute OKLab + alpha for each pixel ONCE upfront.
+    // Pre-Phase-3.0 each iter ran srgb_u8_to_oklab 3 times per pixel
+    // (assign / sum-accumulate / SSE). For 05-photo-mountain that's
+    // 960K × 100 iter × 3 = 288 million sRGB → OKLab conversions, which
+    // dominated Lloyd's runtime (2.27 s out of 2.75 s total encode).
+    // Memory cost: 16 bytes per pixel (4 × f32 = L, a, b, alpha-scaled)
+    // = ~ 15 MB for a 1200 × 800 image; acceptable for the runtime win.
+    let pixels_oklab_alpha: Vec<(f32, f32, f32, u8)> = src_rgba
+        .par_chunks_exact(4)
+        .map(|px| {
+            let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
+            (p.l, p.a, p.b, px[3])
+        })
+        .collect();
 
-        // Sequential accumulation (small enough to not need parallel reduce).
+    // Pre-allocate assigned buffer; reused each iter.
+    let mut assigned: Vec<u8> = vec![0u8; pixels_oklab_alpha.len()];
+    for _ in 0..n_iters {
+        use rayon::iter::IndexedParallelIterator;
+        use rayon::slice::ParallelSliceMut;
+        // Parallel per-pixel assign over precomputed OKLab pixels.
+        const CHUNK: usize = 8192;
+        let palette_ref: &[Oklab] = &palette;
+        let alpha_ref: &[u8] = &alpha;
+        pixels_oklab_alpha
+            .par_chunks(CHUNK)
+            .zip(assigned.par_chunks_mut(CHUNK))
+            .for_each(|(pixels, out)| {
+                for (pi, &(pl, pa_l, pb, pa_alpha)) in pixels.iter().enumerate() {
+                    let mut best_j = 0usize;
+                    let mut best_d2 = f32::INFINITY;
+                    for j in 0..k {
+                        let pj = palette_ref[j];
+                        let dl = pl - pj.l;
+                        let da = pa_l - pj.a;
+                        let db = pb - pj.b;
+                        let d_alpha = (pa_alpha as i32 - alpha_ref[j] as i32) as f32 * ALPHA_SCALE;
+                        let d2 = dl.mul_add(
+                            dl,
+                            da.mul_add(da, db.mul_add(db, d_alpha * d_alpha)),
+                        );
+                        if d2 < best_d2 {
+                            best_d2 = d2;
+                            best_j = j;
+                        }
+                    }
+                    out[pi] = best_j as u8;
+                }
+            });
+        let _ = (palette_ref.len(), alpha_ref.len()); // silence unused
+
+        // Sequential accumulation over precomputed OKLab pixels.
+        // Phase 3.0: also accumulate Σx² in the SAME pass so SSE_j =
+        // Σx² − count × mean² is computable without a second loop.
+        // (Pre-Phase-3.0 ran two O(N) sequential passes per iter — the
+        // sum/count, then a second pass to compute SSE for split-on-
+        // empty. Algebraic identity collapses them into one.)
         let mut sum_l = vec![0.0f64; k];
         let mut sum_a = vec![0.0f64; k];
         let mut sum_b = vec![0.0f64; k];
         let mut sum_alpha = vec![0u64; k];
+        let mut sum_l2 = vec![0.0f64; k];
+        let mut sum_a2 = vec![0.0f64; k];
+        let mut sum_b2 = vec![0.0f64; k];
+        let mut sum_alpha2 = vec![0.0f64; k]; // already-scaled (alpha*SCALE)²
         let mut count = vec![0u64; k];
-        for (pi, px) in src_rgba.chunks_exact(4).enumerate() {
-            let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
+        for (pi, &(pl, pa, pb, pa_alpha)) in pixels_oklab_alpha.iter().enumerate() {
             let j = assigned[pi] as usize;
-            sum_l[j] += p.l as f64;
-            sum_a[j] += p.a as f64;
-            sum_b[j] += p.b as f64;
-            sum_alpha[j] += px[3] as u64;
+            let pl_f64 = pl as f64;
+            let pa_f64 = pa as f64;
+            let pb_f64 = pb as f64;
+            let palpha_scaled = pa_alpha as f64 * ALPHA_SCALE as f64;
+            sum_l[j] += pl_f64;
+            sum_a[j] += pa_f64;
+            sum_b[j] += pb_f64;
+            sum_alpha[j] += pa_alpha as u64;
+            sum_l2[j] += pl_f64 * pl_f64;
+            sum_a2[j] += pa_f64 * pa_f64;
+            sum_b2[j] += pb_f64 * pb_f64;
+            sum_alpha2[j] += palpha_scaled * palpha_scaled;
             count[j] += 1;
         }
         let mut max_move = 0.0f32;
-        // Phase 2.7: track per-cluster mean squared OKLab+alpha error
-        // (within-cluster variance) so we can split high-error clusters
-        // into empty slots. Without this, Stone D Lloyd lets clusters
-        // go empty (114/256 effective palette on 04-portrait) which
-        // loses color resolution vs TinyPNG's full 256.
-        let mut sse = vec![0.0f64; k]; // sum of squared errors per cluster
-        for (pi, px) in src_rgba.chunks_exact(4).enumerate() {
-            let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
-            let pa = px[3];
-            let j = assigned[pi] as usize;
+        // SSE_j = (sum_l2 − sum_l²/count) + (sum_a2 − …) + …
+        // (each term is the per-axis variance times count)
+        let mut sse = vec![0.0f64; k];
+        for j in 0..k {
             if count[j] == 0 { continue; }
             let nc = count[j] as f64;
-            let mean_l = (sum_l[j] / nc) as f32;
-            let mean_a = (sum_a[j] / nc) as f32;
-            let mean_b = (sum_b[j] / nc) as f32;
-            let mean_alpha = (sum_alpha[j] as f64 / nc).round() as u8;
-            let dl = (p.l - mean_l) as f64;
-            let da = (p.a - mean_a) as f64;
-            let db = (p.b - mean_b) as f64;
-            let dpa = (pa as i32 - mean_alpha as i32) as f64 * ALPHA_SCALE as f64;
-            sse[j] += dl * dl + da * da + db * db + dpa * dpa;
+            let mean_alpha_scaled = (sum_alpha[j] as f64 / nc) * ALPHA_SCALE as f64;
+            sse[j] = (sum_l2[j] - sum_l[j] * sum_l[j] / nc)
+                + (sum_a2[j] - sum_a[j] * sum_a[j] / nc)
+                + (sum_b2[j] - sum_b[j] * sum_b[j] / nc)
+                + (sum_alpha2[j] - nc * mean_alpha_scaled * mean_alpha_scaled);
         }
 
         let mut empty_slots: Vec<usize> = (0..k).filter(|&j| count[j] == 0).collect();
