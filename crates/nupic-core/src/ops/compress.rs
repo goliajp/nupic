@@ -199,6 +199,15 @@ fn encode_png_stone_c(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     let rgba = img.inner().to_rgba8();
     let (w, h) = (rgba.width(), rgba.height());
     let raw = rgba.into_raw();
+    // Cycle 25: gradient content (extreme-smooth + many colors) is
+    // 10× smaller via lossless RGBA path than via 256-palette quantize
+    // + dither. Detect cheaply and route to lossless when it wins.
+    // 08-gradient-large evidence:
+    //   palette quantize + d=0.7  = 497 KB / SSIMULACRA2 68.08
+    //   lossless                  =  53 KB / SSIMULACRA2 100.00
+    if nupic_quantize::is_gradient_candidate(&raw, w) {
+        return encode_png_lossless(img, opts);
+    }
     let qopts = nupic_quantize::QuantizeOpts {
         n_colors: 256,
         // Cycle 21: pass full effort 0-10 through (was capped at 6).

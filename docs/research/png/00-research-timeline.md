@@ -61,6 +61,20 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 24-25 — gradient → lossless auto-routing(v0.5.38,ship)
+- Cycle 24:`classify_for_auto_dither` 加 `adj_mn < 1.0 → 0.7` tier-4c
+  bucket(extreme-smooth gradient need strong dither against banding)。
+  08 SSIM 58.98 → 68.08(+9.1),其他 fixture bit-exact
+- Cycle 25:probe 15-fixture lossless vs auto:**只有 08 lossless 双胜**
+  (53 KB vs 497 KB,SSIM 100 vs 68)
+- 实装 `nupic-quantize::is_gradient_candidate`(opaque + adj_mn<1.0 +
+  uniq≥1000),`encode_png_stone_c` 检测到 gradient → 走 lossless
+- **08 终态:53 KB / SSIM 100**(pre-Cycle-23 是 190 KB / 37.72 → 
+  **-72% size AND +62 SSIM** 一个数量级 quality jump)
+- 原 7-fixture + 其他 7 ext fixture 全 bit-exact unchanged
+- 219 tests 全绿
+- Essay:`03t-cycle24-25-gradient-lossless.md`
+
 ### Cycle 23 — extended corpus + tier-3 uniq-color guard(v0.5.37,ship)
 - **新增 8 fixture**(`assets/png-bench/inputs-ext/`):08 gradient-large、
   09 ui-checker-text、10 comic-flat、11 photo-noisy、12 tiny-icon、

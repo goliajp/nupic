@@ -624,6 +624,68 @@ pub fn apply_palette(
 /// in row-major order. Photo content rarely has 2 adjacent identical
 /// pixels (skin / sky / landscape gradients);UI screenshots have
 /// long flat-color runs (text backgrounds, solid panels).
+///
+/// Phase 3.8 (Cycle 25): detect gradient-class content where lossless
+/// PNG via oxipng beats palette-quantize + dither on BOTH dimensions.
+///
+/// 08-gradient-large evidence: lossless = 53 KB / SSIM 100 vs auto-dither
+/// at d=0.7 = 497 KB / SSIM 68. The smooth gradient (low local diff)
+/// + many distinct colors (uniq ≥ 1000) signature compresses brilliantly
+/// in raw RGBA deflate but loses heavily through 256-palette quantize.
+///
+/// Returns `true` when `encode_png_stone_c` callers should prefer the
+/// lossless RGBA path (`encode_png_lossless`) over palette-quantize.
+///
+/// Heuristic computed cheaply: O(N) for variance + O(min N, 1000) for
+/// unique color count with early-exit. Same signals as
+/// [`classify_for_auto_dither`].
+#[must_use]
+pub fn is_gradient_candidate(src_rgba: &[u8], width: u32) -> bool {
+    let n_total = src_rgba.len() / 4;
+    if n_total < 200_000 || width < 2 { return false; }
+    // Must be fully opaque (mixed-alpha gradients aren't this pattern).
+    let mut n_opaque = 0usize;
+    for px in src_rgba.chunks_exact(4) {
+        if px[3] == 255 { n_opaque += 1; }
+    }
+    if (n_opaque as f64 / n_total as f64) < 0.95 { return false; }
+
+    let w = width as usize;
+    let h = n_total / w;
+    const TARGET: usize = 500_000;
+    let samples_per_row = (w - 1).max(1);
+    let target_rows = TARGET.div_ceil(samples_per_row);
+    let step = (h / target_rows.max(1)).max(1);
+    let mut sum_diff: u64 = 0;
+    let mut count: u64 = 0;
+    for y in (0..h).step_by(step) {
+        for x in 0..w - 1 {
+            let i = (y * w + x) * 4;
+            let l0 = (src_rgba[i] as u32 + src_rgba[i + 1] as u32
+                    + src_rgba[i + 2] as u32) / 3;
+            let l1 = (src_rgba[i + 4] as u32 + src_rgba[i + 5] as u32
+                    + src_rgba[i + 6] as u32) / 3;
+            let d = (l0 as i32 - l1 as i32).unsigned_abs() as u64;
+            sum_diff += d;
+            count += 1;
+        }
+    }
+    if count == 0 { return false; }
+    let mean = sum_diff as f64 / count as f64;
+    if mean >= 1.0 { return false; }  // not extreme-smooth
+
+    // Confirm: lots of unique colors (gradient, not flat block)
+    let step_u = if n_total > 1_000_000 { 4 } else { 1 };
+    let mut uniq = std::collections::HashSet::with_capacity(1024);
+    for p in src_rgba.chunks_exact(4).step_by(step_u) {
+        if p[3] != 255 { continue; }
+        let key = (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16);
+        uniq.insert(key);
+        if uniq.len() >= 1000 { return true; }
+    }
+    false
+}
+
 #[must_use]
 pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
     let mut n_opaque = 0usize;
@@ -748,6 +810,16 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
     }
     let mean = sum_diff as f64 / count as f64;
     let var = (sum_sq as f64 / count as f64) - mean * mean;
+    // Phase 3.7 (Cycle 24): extreme-smooth gradient detector. When the
+    // mean adjacent-pixel luminance diff is < 1.0, the image is a smooth
+    // gradient that suffers heavy palette banding without strong dither.
+    // 08-gradient-large (adj_mn=0.06) sweeps from SSIM 58.98 (d=0.5,
+    // tier-4a) to SSIM 68.08 (d=0.7) — +9.1 SSIM. Real photos have
+    // adj_mn ≥ 2.8 (13 very-large=2.84, 04 portrait=3.81), so the
+    // 1.0 threshold catches gradient-class without affecting photos.
+    if mean < 1.0 {
+        return 0.7; // tier-4c: gradient (banding-prone, needs strong dither)
+    }
     if var > 50.0 {
         0.7 // tier-4b: textured photo
     } else {
