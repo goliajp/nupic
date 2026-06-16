@@ -481,27 +481,27 @@ pub fn apply_palette(
 
 /// Auto-pick Stone E dither strength from a tiered content classifier.
 ///
-/// **3-tier decision tree**:
+/// **4-tier decision tree**(updated Cycle 8 Pass 1 with transparent-
+/// photo tier discovered via 02-pluto fine-grain dither sweep):
 ///
-/// 1. `opaque_ratio < 0.95 || n_pixels < 200_000`:return `0.0`
-///    (small / transparent — Stone D no-dither path already wins,see
-///    02-pluto / 03-wikipedia-logo Pareto frontier in 03f essay).
-/// 2. `mean_run > 2.0`:return `0.25`(UI screenshot / logo class
-///    — strength 0.5 over-dithers,see testflight regression on
-///    `03e-stone-e-fs-dither.md` §3).
-/// 3. otherwise:return `0.5`(photo class — Pareto-optimal point in
-///    03f sweep on 04/05/06/07 photo fixtures).
+/// 1. `opaque_ratio < 0.50 || n_pixels < 200_000`:return `0.0`
+///    (small / transparency-dominant — Stone D no-dither path already
+///    wins,see 01-transparency-demo / 03-wikipedia-logo Pareto
+///    frontier in 03f essay).
+/// 2. `0.50 ≤ opaque_ratio < 0.95`(partially-transparent photo,
+///    e.g. 02-pluto):return `0.25`。Cycle 8 fine sweep showed
+///    monotonic SSIM gain 0.05-0.25 on 02-pluto(79.66 → 80.44),
+///    +2.5% size。Stronger dither over-mixes alpha boundaries。
+/// 3. fully opaque + `mean_run > 2.0`:return `0.25`(UI screenshot
+///    class — strength 0.5 over-dithers,see testflight regression
+///    on `03e-stone-e-fs-dither.md` §3).
+/// 4. fully opaque + low mean_run:return `0.5`(photo class — Pareto-
+///    optimal point in 03f sweep on 04/05/06/07 photo fixtures).
 ///
 /// `mean_run` = mean length of consecutive RGB-identical pixel runs
 /// in row-major order. Photo content rarely has 2 adjacent identical
 /// pixels (skin / sky / landscape gradients);UI screenshots have
 /// long flat-color runs (text backgrounds, solid panels).
-///
-/// 03f Pareto sweep showed perfect separation on the 7-fixture + 2
-/// dogfood corpus:
-/// - Photos: mean_run ∈ [1.10, 1.36] → tier-3 (0.5)
-/// - UI: mean_run ∈ [7.89, 94.53] → tier-2 (0.25)
-/// - Logos / transparent: tier-1 (0.0)
 #[must_use]
 pub fn classify_for_auto_dither(src_rgba: &[u8]) -> f32 {
     let mut n_opaque = 0usize;
@@ -512,14 +512,17 @@ pub fn classify_for_auto_dither(src_rgba: &[u8]) -> f32 {
             n_opaque += 1;
         }
     }
-    if n_total == 0 {
-        return 0.0;
+    if n_total < 200_000 {
+        return 0.0; // tier-1: small
     }
     let opaque_ratio = n_opaque as f64 / n_total as f64;
-    if opaque_ratio < 0.95 || n_total < 200_000 {
-        return 0.0;
+    if opaque_ratio < 0.50 {
+        return 0.0; // tier-1: transparency-dominant
     }
-    // tier-2 vs tier-3: mean-run-length signal.
+    if opaque_ratio < 0.95 {
+        return 0.25; // tier-2: partially-transparent photo (02-pluto class)
+    }
+    // tier-3 vs tier-4: mean-run-length signal.
     let mut runs: u64 = 0;
     let mut total_runs: u64 = 0;
     let mut prev: [u8; 3] = [0, 0, 0];
@@ -547,9 +550,9 @@ pub fn classify_for_auto_dither(src_rgba: &[u8]) -> f32 {
         runs as f64 / total_runs as f64
     };
     if mean_run > 2.0 {
-        0.25
+        0.25 // tier-3: UI screenshot
     } else {
-        0.5
+        0.5  // tier-4: photo
     }
 }
 

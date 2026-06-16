@@ -61,6 +61,18 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 8 — dogfood verify + 02-pluto tier-2 dither(0.5.27-0.5.28)
+- 0.5.27 unpin `rust-version`(no longer pin 1.85,track latest stable
+  toolchain per user directive)
+- 0.5.28 `--dither auto` 4-tier classifier(was 3-tier):add **tier-2
+  transparent-photo class**(0.50 ≤ opaque_ratio < 0.95 → 0.25 dither)。
+  Discovered via 02-pluto fine-grain sweep:dither 0.05-0.25 monotonic
+  +SSIM up to 80.44(+0.78 over default no-dither)。Tier-2 expansion
+  catches 02-pluto class(transparent-but-mostly-opaque photos)
+  without affecting fully-transparent UI panels(< 0.5 opaque)
+  → essay TODO 03m
+- Dogfood verify Cycle 7 Stone D pad+split on testflight:**SSIM 84.72 → 89.64**(+4.92);vantage unchanged
+
 ### Cycle 7 — palette ceiling close(0.5.25+)
 - 0.5.25 Stone D **palette pad + split-on-empty**:imagequant returns
   < n_colors when quality threshold(95)met early(04-portrait 114 of
