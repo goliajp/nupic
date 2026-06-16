@@ -213,14 +213,17 @@ fn encode_png_stone_c_nupic(img: &Image, _opts: &CompressOpts) -> Result<Vec<u8>
     let raw = rgba.into_raw();
     let qi = nupic_quantize::quantize(&raw, w, h, 256)
         .map_err(|e| Error::Codec(Box::new(e)))?;
+    let trns = if qi.palette_alpha.iter().all(|&a| a == 255) {
+        None
+    } else {
+        Some(qi.palette_alpha)
+    };
     let png_img = nupic_png::IndexedImage {
         width: w,
         height: h,
-        palette: qi.palette_srgb.into_iter().collect::<Vec<rgb::Rgb<u8>>>(),
+        palette: qi.palette_srgb,
         indices: qi.indices,
-        // tRNS not exposed by `nupic_quantize::quantize` yet — alpha is
-        // currently dropped on indexed PNG output regardless of backend.
-        trns: None,
+        trns,
     };
     Ok(nupic_png::encode_indexed_png_with(
         &png_img,

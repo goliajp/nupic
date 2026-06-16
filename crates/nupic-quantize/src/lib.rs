@@ -67,9 +67,16 @@ pub fn quantize_indexed_png(
     height: u32,
     opts: QuantizeOpts,
 ) -> Result<Vec<u8>, QuantizeError> {
-    let palette = train_palette(src_rgba, width, height, opts.n_colors)?;
-    let (indices, palette_srgb) = apply_palette(src_rgba, width, height, &palette);
-    let raw = encode_indexed_png(width, height, &indices, &palette_srgb)?;
+    let (palette_oklab, palette_alpha) =
+        train_palette_rgba(src_rgba, width, height, opts.n_colors)?;
+    let (indices, palette_srgb) =
+        apply_palette_rgba(src_rgba, width, height, &palette_oklab, &palette_alpha);
+    let trns_opt = if palette_alpha.iter().all(|&a| a == 255) {
+        None
+    } else {
+        Some(palette_alpha.as_slice())
+    };
+    let raw = encode_indexed_png_with_alpha(width, height, &indices, &palette_srgb, trns_opt)?;
     let preset = opts.oxipng_preset.min(6);
     let mut oxipng_opts = oxipng::Options::from_preset(preset);
     if opts.strip_metadata {
@@ -80,36 +87,63 @@ pub fn quantize_indexed_png(
 }
 
 /// Stone C's quantizer output: per-pixel palette index buffer + the
-/// final sRGB palette. Use this if you want to feed indices into a
-/// custom PNG encoder (e.g. animated PNG, JPEG XL) instead of the
-/// canned [`quantize_indexed_png`] pipeline.
+/// final sRGB palette + per-entry alpha (for tRNS chunk emission).
+/// Use this if you want to feed indices into a custom PNG encoder
+/// (e.g. animated PNG, JPEG XL) instead of the canned
+/// [`quantize_indexed_png`] pipeline.
+///
+/// `palette_alpha` is always populated;callers that want to skip the
+/// `tRNS` chunk should check `palette_alpha.iter().all(|&a| a == 255)`
+/// — when true, no transparency information is present and `tRNS` can
+/// be omitted.
 pub struct QuantizedImage {
     pub indices: Vec<u8>,
     pub palette_srgb: Vec<Rgb<u8>>,
+    pub palette_alpha: Vec<u8>,
 }
 
-/// Full quantization: train palette via imagequant median-cut, then
-/// apply it via OKLab argmin (no dither).
+/// Full quantization: train palette via imagequant median-cut(RGBA-
+/// aware),then apply it via OKLab+alpha argmin (no dither). Phase 2.1:
+/// preserves source alpha through the palette so the resulting indexed
+/// PNG can carry a `tRNS` chunk.
 pub fn quantize(
     src_rgba: &[u8],
     width: u32,
     height: u32,
     n_colors: usize,
 ) -> Result<QuantizedImage, QuantizeError> {
-    let palette = train_palette(src_rgba, width, height, n_colors)?;
-    let (indices, palette_srgb) = apply_palette(src_rgba, width, height, &palette);
-    Ok(QuantizedImage { indices, palette_srgb })
+    let (palette_oklab, palette_alpha) = train_palette_rgba(src_rgba, width, height, n_colors)?;
+    let (indices, palette_srgb) =
+        apply_palette_rgba(src_rgba, width, height, &palette_oklab, &palette_alpha);
+    Ok(QuantizedImage { indices, palette_srgb, palette_alpha })
 }
 
 /// Train palette: imagequant median-cut → convert to OKLab. The
 /// median-cut step uses `quality (70, 95)` first, falling back to
 /// `(0, 95)` on QualityTooLow.
+///
+/// **RGB-only** variant — alpha is discarded. Phase 1.x callers stay
+/// on this; new callers should prefer [`train_palette_rgba`].
 pub fn train_palette(
     src_rgba: &[u8],
     width: u32,
     height: u32,
     n_colors: usize,
 ) -> Result<Vec<Oklab>, QuantizeError> {
+    train_palette_rgba(src_rgba, width, height, n_colors).map(|(oklab, _)| oklab)
+}
+
+/// Train palette and **preserve per-entry alpha** alongside OKLab. The
+/// returned `Vec<u8>` is parallel to the `Vec<Oklab>` — `alpha[i]` is
+/// the alpha of `palette_oklab[i]` as quantized by imagequant.
+///
+/// Phase 2.1 entry point — enables tRNS chunk emission downstream.
+pub fn train_palette_rgba(
+    src_rgba: &[u8],
+    width: u32,
+    height: u32,
+    n_colors: usize,
+) -> Result<(Vec<Oklab>, Vec<u8>), QuantizeError> {
     fn try_iq(src_rgba: &[u8], w: u32, h: u32, q_min: u8) -> Result<Vec<rgb::RGBA8>, ()> {
         let pixels: Vec<rgb::RGBA8> = src_rgba.chunks_exact(4)
             .map(|c| rgb::RGBA8 { r: c[0], g: c[1], b: c[2], a: c[3] })
@@ -127,11 +161,15 @@ pub fn train_palette(
     let palette_rgba = try_iq(src_rgba, width, height, 70)
         .or_else(|_| try_iq(src_rgba, width, height, 0))
         .map_err(|_| QuantizeError::ImagequantFailed)?;
-    let mut out: Vec<Oklab> = palette_rgba.iter()
+    let mut oklab: Vec<Oklab> = palette_rgba.iter()
         .map(|c| srgb_u8_to_oklab(Rgb { r: c.r, g: c.g, b: c.b }))
         .collect();
-    if out.len() > n { out.truncate(n); }
-    Ok(out)
+    let mut alpha: Vec<u8> = palette_rgba.iter().map(|c| c.a).collect();
+    if oklab.len() > n {
+        oklab.truncate(n);
+        alpha.truncate(n);
+    }
+    Ok((oklab, alpha))
 }
 
 /// Hard-quantise an RGBA8 source against a pre-trained OKLab palette.
@@ -149,26 +187,59 @@ pub fn apply_palette(
     height: u32,
     palette: &[Oklab],
 ) -> (Vec<u8>, Vec<Rgb<u8>>) {
+    // RGB-only legacy path — treat all palette entries as fully opaque
+    // and ignore source alpha. Preserves the bit-exact 0.4-0.5 Stone C
+    // behaviour for callers that don't need tRNS.
+    let alpha = vec![255u8; palette.len()];
+    let (indices, palette_srgb) = apply_palette_rgba(src_rgba, width, height, palette, &alpha);
+    (indices, palette_srgb)
+}
+
+/// Alpha-aware variant of [`apply_palette`]. Each pixel is matched
+/// against the palette using a 4-D distance metric:
+///
+/// `d² = (ΔL)² + (Δa)² + (Δb)² + ALPHA_WEIGHT² · (Δα/255)²`
+///
+/// where `ALPHA_WEIGHT = 2.0` — large enough that opaque pixels prefer
+/// opaque palette entries even when the closest OKLab match is on a
+/// transparent entry. Stone C's "OKLab argmin, no dither" insight is
+/// preserved; alpha just becomes a fourth comparison axis.
+///
+/// Phase 2.1 entry point.
+pub fn apply_palette_rgba(
+    src_rgba: &[u8],
+    width: u32,
+    height: u32,
+    palette_oklab: &[Oklab],
+    palette_alpha: &[u8],
+) -> (Vec<u8>, Vec<Rgb<u8>>) {
     use rayon::iter::{IndexedParallelIterator, ParallelIterator};
     use rayon::slice::{ParallelSlice, ParallelSliceMut};
 
     let n_pixels = (width as usize) * (height as usize);
     assert_eq!(src_rgba.len(), n_pixels * 4);
-    let k = palette.len();
+    assert_eq!(palette_oklab.len(), palette_alpha.len());
+    let k = palette_oklab.len();
+    const ALPHA_WEIGHT: f32 = 2.0;
+    const ALPHA_SCALE: f32 = ALPHA_WEIGHT / 255.0;
     let mut indices = vec![0u8; n_pixels];
     src_rgba
         .par_chunks_exact(4)
         .zip(indices.par_chunks_exact_mut(1))
         .for_each(|(px, idx)| {
             let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
+            let pa = px[3];
             let mut best_j = 0usize;
             let mut best_d2 = f32::INFINITY;
             for j in 0..k {
-                let pj = palette[j];
+                let pj = palette_oklab[j];
                 let dl = p.l - pj.l;
                 let da = p.a - pj.a;
                 let db = p.b - pj.b;
-                let d2 = dl.mul_add(dl, da.mul_add(da, db * db));
+                let d_alpha = (pa as i32 - palette_alpha[j] as i32) as f32 * ALPHA_SCALE;
+                let d2 = dl.mul_add(dl,
+                    da.mul_add(da,
+                        db.mul_add(db, d_alpha * d_alpha)));
                 if d2 < best_d2 {
                     best_d2 = d2;
                     best_j = j;
@@ -176,19 +247,35 @@ pub fn apply_palette(
             }
             idx[0] = best_j as u8;
         });
-    let palette_srgb: Vec<Rgb<u8>> = palette.iter().map(|c| oklab_to_srgb_u8(*c)).collect();
+    let palette_srgb: Vec<Rgb<u8>> = palette_oklab.iter().map(|c| oklab_to_srgb_u8(*c)).collect();
     (indices, palette_srgb)
 }
 
-/// Encode an indexed PNG byte stream (palette + index data). Alpha
-/// channel is not encoded in this minimal pipeline — Stone C's
-/// alpha-via-tRNS handling is a Stone D follow-up.
+/// Encode an indexed PNG byte stream (palette + index data, no tRNS).
+/// Convenience wrapper around [`encode_indexed_png_with_alpha`] for
+/// callers that don't need transparency.
 pub fn encode_indexed_png(
     width: u32,
     height: u32,
     indices: &[u8],
     palette_srgb: &[Rgb<u8>],
 ) -> Result<Vec<u8>, QuantizeError> {
+    encode_indexed_png_with_alpha(width, height, indices, palette_srgb, None)
+}
+
+/// Encode an indexed PNG byte stream with optional `tRNS` chunk for
+/// per-palette-entry alpha. `palette_alpha`, when `Some`, must have
+/// the same length as `palette_srgb`. Phase 2.1 entry point.
+pub fn encode_indexed_png_with_alpha(
+    width: u32,
+    height: u32,
+    indices: &[u8],
+    palette_srgb: &[Rgb<u8>],
+    palette_alpha: Option<&[u8]>,
+) -> Result<Vec<u8>, QuantizeError> {
+    if let Some(a) = palette_alpha {
+        debug_assert_eq!(a.len(), palette_srgb.len(), "tRNS / palette length mismatch");
+    }
     let mut rgb_palette: Vec<u8> = Vec::with_capacity(palette_srgb.len() * 3);
     for c in palette_srgb {
         rgb_palette.push(c.r);
@@ -201,6 +288,18 @@ pub fn encode_indexed_png(
         enc.set_color(png::ColorType::Indexed);
         enc.set_depth(png::BitDepth::Eight);
         enc.set_palette(rgb_palette);
+        if let Some(a) = palette_alpha {
+            // Trim trailing 255s — PNG spec allows tRNS shorter than the
+            // palette, with un-listed entries implicitly opaque.
+            let last_nonopaque = a.iter().rposition(|&v| v != 255);
+            let trimmed: Vec<u8> = match last_nonopaque {
+                Some(i) => a[..=i].to_vec(),
+                None => Vec::new(),
+            };
+            if !trimmed.is_empty() {
+                enc.set_trns(trimmed);
+            }
+        }
         let mut writer = enc.write_header().map_err(|e| QuantizeError::PngEncode(format!("{e}")))?;
         writer.write_image_data(indices).map_err(|e| QuantizeError::PngEncode(format!("{e}")))?;
     }
