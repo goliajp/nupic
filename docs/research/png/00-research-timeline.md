@@ -61,6 +61,24 @@
 - 0.5.17 Stone E `--dither <float>` opt-in(FS-light)photo +1-5 SSIM,UI sensitive → [03e](03e-stone-e-fs-dither.md)
 - 0.5.18 Stone E `--dither auto`(opaque-large → 0.25)— non-regression dogfood
 
+### Cycle 28-29 — tier-1c / tier-2c sharp-mask transparency split(v0.5.40,ship)
+- 续 corpus 扩张:+3 partial-transparent fixture from Wikimedia(21
+  earth-hemisphere,22 tree,23 statue-liberty)
+- **Signal**:`a_partial < 0.10`(few partial-alpha pixels)= **sharp-mask
+  object on transparent BG** → dither 便宜(0.5-2.9% size cost for
+  meaningful SSIM)
+- vs `a_partial > 0.10`(smooth alpha gradient)= **dither expensive**
+  (27-33% size cost,e.g. 14 soft-trans / 01 trans-demo)
+- 实装:tier-1 + tier-2 都加 sharp-mask split。 a_partial < 0.10 → d=0.5
+- 4 fixture 改善 (**累 +2.48 SSIM**):
+  - 02 pluto +0.14 / +2.4 KB
+  - 21 earth-hemi +0.50 / +36 KB
+  - 22 tree +1.54 / +42 KB
+  - 23 statue +0.30 / +1.8 KB
+- 01 / 14(smooth-gradient counter-examples)bit-exact correct stay 0
+- 其他 19 fixture 全 bit-exact identical;219 tests 全绿
+- Essay:`03v-cycle28-29-trans-sharpmask.md`
+
 ### Cycle 27 — real-photo ext corpus + tier-4d high-uniq split(v0.5.39,ship)
 - 用户要求"上网找 8mp photo 验更多 ceiling 信号"
 - 新 fixture(`assets/png-bench/inputs-ext-real/`,public-domain from

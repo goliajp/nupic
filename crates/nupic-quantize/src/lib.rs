@@ -689,11 +689,14 @@ pub fn is_gradient_candidate(src_rgba: &[u8], width: u32) -> bool {
 #[must_use]
 pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
     let mut n_opaque = 0usize;
+    let mut n_zero_alpha = 0usize;
     let mut n_total = 0usize;
     for px in src_rgba.chunks_exact(4) {
         n_total += 1;
-        if px[3] == 255 {
-            n_opaque += 1;
+        match px[3] {
+            255 => n_opaque += 1,
+            0 => n_zero_alpha += 1,
+            _ => {}
         }
     }
     if n_total < 200_000 {
@@ -701,17 +704,41 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
     }
     let opaque_ratio = n_opaque as f64 / n_total as f64;
     if opaque_ratio < 0.50 {
-        return 0.0; // tier-1: transparency-dominant
+        // Phase 3.10 (Cycle 28): tier-1c sharp-mask transparency.
+        // When most pixels are alpha=0 (transparent BG) or alpha=255
+        // (opaque foreground), partial-alpha pixels are rare (< 10%
+        // of total). This is the "object on transparent" pattern,
+        // where palette quantize covers FG colors well and the few
+        // edge pixels benefit from light dither cheaply.
+        //
+        // 22-tree-trans (a_partial=0.052) → d=0.5: +1.8 SSIM / +4% size
+        // 23-statue    (a_partial=0.001) → d=0.5: +0.4 SSIM / +4% size
+        // 01-trans-demo(a_partial=0.291) → stay 0  (smooth-gradient)
+        // 14-soft-trans(a_partial=0.991) → stay 0  (smooth-gradient)
+        let n_partial = n_total - n_opaque - n_zero_alpha;
+        let a_partial_ratio = n_partial as f64 / n_total as f64;
+        if a_partial_ratio < 0.10 {
+            return 0.5; // tier-1c: sharp-mask object on transparent
+        }
+        return 0.0; // tier-1: transparency-dominant (smooth-gradient or mixed)
     }
     if opaque_ratio < 0.95 {
-        // tier-2: partially-transparent photo (02-pluto class).
-        // Cycle 20: dither sweep on 02 (the only tier-2 corpus fixture)
-        // showed d=0.35 Pareto-optimal:
-        //   d=0.00 size=158109 SSIM=79.66
-        //   d=0.25 size=162009 SSIM=80.44 (pre-Cycle-20 default)
-        //   d=0.35 size=163674 SSIM=80.73 (chosen — +0.29 SSIM / +1.7KB)
-        //   d=0.50 size=166057 SSIM=80.87 (peak SSIM but +4KB)
-        //   d=0.70 size=168753 SSIM=80.39 (regresses)
+        // tier-2: partially-transparent photo. Mirror the tier-1c sharp-
+        // mask split — when partial-alpha pixels are < 10% of total
+        // (object on transparent BG), dither helps cheaply.
+        //
+        // Cycle 28 evidence (a_partial across tier-2 fixtures):
+        //   02 pluto       a_partial=0.008  d=0.50 SSIM 80.87 (peak)
+        //   21 earth-hemi  a_partial=0.046  d=0.50 SSIM 66.42 (+0.50 SSIM
+        //                                                       at +2.6% size)
+        //   (no smooth-gradient tier-2 fixture in corpus yet)
+        let n_partial = n_total - n_opaque - n_zero_alpha;
+        let a_partial_ratio = n_partial as f64 / n_total as f64;
+        if a_partial_ratio < 0.10 {
+            return 0.5; // tier-2c: sharp-mask partial-transparent photo
+        }
+        // Cycle 20 default for smooth-gradient tier-2 fixtures (none in
+        // current corpus but safe fallback).
         return 0.35;
     }
     // tier-3 vs tier-4: mean-run-length signal.
