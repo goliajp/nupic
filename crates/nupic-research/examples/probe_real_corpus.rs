@@ -60,15 +60,39 @@ fn signals(raw: &[u8], w: u32) -> (f64, f64, f64, f64, usize) {
 
 fn main() -> Result<()> {
     let root = workspace_root()?;
-    for f in [
-        "16-earthrise-25mp.png", "17-aurora-5mp.png",
-        "18-snowflake-17mp.png", "19-iceberg-3mp.png",
-        "20-rainbow-19mp.png",
-        "24-melk-abbey-24mp.png", "25-sofia-cathedral-5mp.png",
-        "26-angkor-wat-32mp.png", "27-whale-tail-5mp.png",
-        "28-orca-14mp.png", "29-sundew-3mp.png",
-    ] {
-        let p = root.join("assets/png-bench/inputs-ext-real").join(f);
+    let bench = [
+        ("inputs", "01-png-transparency-demo.png"),
+        ("inputs", "02-pluto-transparent.png"),
+        ("inputs", "03-wikipedia-logo.png"),
+        ("inputs", "04-photo-portrait.png"),
+        ("inputs", "05-photo-mountain.png"),
+        ("inputs", "06-photo-landscape.png"),
+        ("inputs", "07-photo-product.png"),
+        ("inputs-ext", "08-gradient-large.png"),
+        ("inputs-ext", "09-ui-checker-text.png"),
+        ("inputs-ext", "10-comic-flat.png"),
+        ("inputs-ext", "11-photo-noisy.png"),
+        ("inputs-ext", "12-tiny-icon.png"),
+        ("inputs-ext", "13-very-large-photo.png"),
+        ("inputs-ext", "14-soft-transparent.png"),
+        ("inputs-ext", "15-mono-text.png"),
+        ("inputs-ext-real", "16-earthrise-25mp.png"),
+        ("inputs-ext-real", "17-aurora-5mp.png"),
+        ("inputs-ext-real", "18-snowflake-17mp.png"),
+        ("inputs-ext-real", "19-iceberg-3mp.png"),
+        ("inputs-ext-real", "20-rainbow-19mp.png"),
+        ("inputs-ext-real", "21-earth-hemisphere-trans.png"),
+        ("inputs-ext-real", "22-tree-trans.png"),
+        ("inputs-ext-real", "23-statue-liberty-trans.png"),
+        ("inputs-ext-real", "24-melk-abbey-24mp.png"),
+        ("inputs-ext-real", "25-sofia-cathedral-5mp.png"),
+        ("inputs-ext-real", "26-angkor-wat-32mp.png"),
+        ("inputs-ext-real", "27-whale-tail-5mp.png"),
+        ("inputs-ext-real", "28-orca-14mp.png"),
+        ("inputs-ext-real", "29-sundew-3mp.png"),
+    ];
+    for (dir, f) in bench {
+        let p = root.join("assets/png-bench").join(dir).join(f);
         let img = ImageReader::open(&p)?.with_guessed_format()?.decode()?;
         let r = img.to_rgba8();
         let w = r.width();
@@ -76,7 +100,7 @@ fn main() -> Result<()> {
         let (opq, mr, am, av, uniq) = signals(&raw, w);
         let d = nupic_quantize::classify_for_auto_dither(&raw, w);
         let grad = nupic_quantize::is_gradient_candidate(&raw, w);
-        println!("{:<28} opq={:.3} mr={:.2} adj_mn={:.2} var={:.1} uniq={:>9} d={:.2} grad={}",
+        println!("{:<32} opq={:.3} mr={:.2} adj_mn={:.2} var={:.1} uniq={:>9} d={:.2} grad={}",
             f, opq, mr, am, av, uniq, d, grad);
     }
     Ok(())
