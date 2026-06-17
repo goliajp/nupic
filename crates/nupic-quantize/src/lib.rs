@@ -162,8 +162,11 @@ pub fn quantize_indexed_png(
     // on 5MP+ images costs 1.5-2 s for only +0.1-0.9 % size benefit
     // vs preset=1; on small fixtures (baseline-7) preset=5 gives
     // 4-7 % smaller. Switch to preset=1 when image is ≥ 5 MP.
+    // Cycle 63: for < 5 MP, drop preset 5 → 3 — bench shows
+    // preset=3/4/5 produce IDENTICAL size while preset=3 is 4-12 %
+    // faster. preset=2 starts to hurt size on landscape fixtures.
     let n_pixels = (width as usize) * (height as usize);
-    let preset_default = if n_pixels >= 5_000_000 { 1 } else { opts.oxipng_preset.min(6) };
+    let preset_default = if n_pixels >= 5_000_000 { 1 } else { 3 };
     let preset = if opts.oxipng_preset != QuantizeOpts::default().oxipng_preset {
         opts.oxipng_preset.min(6) // user explicit override
     } else {
