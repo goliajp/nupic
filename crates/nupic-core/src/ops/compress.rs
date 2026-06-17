@@ -208,8 +208,11 @@ fn encode_png_stone_c(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     if nupic_quantize::is_gradient_candidate(&raw, w) {
         return encode_png_lossless(img, opts);
     }
+    // Cycle 39: size-priority routing — adaptive palette size per
+    // signals (opq + uniq) keeps SSIM ≥ TinyPNG while saving 5-58 %
+    // size per fixture vs n=256. See `classify_for_palette_size`.
     let qopts = nupic_quantize::QuantizeOpts {
-        n_colors: 256,
+        n_colors: nupic_quantize::classify_for_palette_size(&raw),
         // Cycle 21: pass full effort 0-10 through (was capped at 6).
         // quantize_indexed_png internally caps libdeflate preset at 6,
         // and treats effort ≥ 7 as opt-in Zopfli deflater (slower,
