@@ -94,17 +94,24 @@ pub fn quantize_indexed_png(
         train_palette_rgba(src_rgba, width, height, opts.n_colors)?;
     // Stone D: palette refinement via Lloyd's k-means.
     // Cycle 43: use importance-sampled Lloyd when α > 0.
+    // Cycle 55: adaptive iter cap. For 5 MP+ images use 20 iters
+    // (captures ~95 % of Lloyd's SSIM gain at 80 % less compute).
+    // Sweep showed 5MP fixtures lose 0.2-1.3 SSIM at cap=20 vs cap=100,
+    // well within TinyPNG-gate buffer on 25/27. Smaller images keep
+    // cap=100 to preserve baseline-7 marketing accuracy.
+    let n_pixels = (width as usize) * (height as usize);
+    let refine_cap = if n_pixels >= 5_000_000 { 20 } else { DEFAULT_REFINE_ITERS };
     (palette_oklab, palette_alpha) = if opts.importance_alpha > 0.0 {
         refine_palette_kmeans_importance(
             src_rgba, width, height,
             &palette_oklab, &palette_alpha,
-            DEFAULT_REFINE_ITERS, opts.importance_alpha,
+            refine_cap, opts.importance_alpha,
         )
     } else {
         refine_palette_kmeans(
             src_rgba, width, height,
             &palette_oklab, &palette_alpha,
-            DEFAULT_REFINE_ITERS,
+            refine_cap,
         )
     };
     // Resolve dither strength: NaN means "auto-classify"; finite > 0
