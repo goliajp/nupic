@@ -783,6 +783,33 @@ pub fn classify_for_palette_size(src_rgba: &[u8], width: usize) -> usize {
     }
     let opq = n_opaque as f64 / n_total as f64;
     if opq < 0.95 {
+        // Cycle 42: tier-trans split by adj_mn + opaque-region uniq.
+        // - adj_mn > 5 ⇒ crisp logo/graphics edges (03 wiki adj_mn=8.20,
+        //   14 soft-trans adj_mn=5.10) — need full palette n=256
+        //   to preserve antialiased edges and any alpha gradient.
+        // - sparse smooth gradient (01 adj_mn=1.92, uniq=4348) → n=32
+        //   buffer +428 vs TinyPNG.
+        // - tier-2c sharp-mask (02 adj_mn=3.17, uniq=19444) → n=48
+        //   buffer +125 vs TinyPNG.
+        // - else default n=64.
+        //
+        // 7-baseline goes -16.28 % → ~-17.14 % at the wide-buffer
+        // fixtures (01/02), while 03 stays at n=256 (size unchanged).
+        let (adj_mn, _var) = compute_adj_lum_diff_stats(src_rgba, width);
+        if adj_mn > 5.0 {
+            return 256;
+        }
+        let step_u = if n_total > 1_000_000 { 4 } else { 1 };
+        let mut uniq = std::collections::HashSet::with_capacity(25_500);
+        for p in src_rgba.chunks_exact(4).step_by(step_u) {
+            if p[3] != 255 { continue; }
+            let key = (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16);
+            uniq.insert(key);
+            if uniq.len() > 25_000 { break; }
+        }
+        let uc = uniq.len();
+        if uc < 5_000 { return 32; }
+        if uc < 25_000 { return 48; }
         return 64;
     }
     // Cycle 40: smooth-gradient detection (cheap: one O(N/step) pass
