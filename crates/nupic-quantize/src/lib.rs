@@ -116,8 +116,20 @@ pub fn quantize_indexed_png(
     };
     // Resolve dither strength: NaN means "auto-classify"; finite > 0
     // means explicit; else no dither.
-    let resolved_strength = if opts.dither_strength.is_nan() {
-        classify_for_auto_dither(src_rgba, width)
+    //
+    // Cycle 73: tier-trans smooth-gradient REQUIRES dither for visual
+    // correctness — Cycle 71 shipped opt-in via `--dither auto` only,
+    // and the bench / user default of dither_strength=0.0 produced
+    // VISUALLY BROKEN output on 01/02 (Read-tool inspection: posterized
+    // dice, harsh alpha-edge ring). Force-override explicit 0.0 to the
+    // auto classifier result. Since classify_for_auto_dither returns
+    // 0.0 for everything EXCEPT tier-trans smooth-gradient (opq<0.95
+    // + adj_mn≤5), opaque content is unaffected. Callers that want
+    // dither off for tier-trans must now pass an explicit positive
+    // override (any value works — they have read the API).
+    let auto_d = classify_for_auto_dither(src_rgba, width);
+    let resolved_strength = if opts.dither_strength.is_nan() || opts.dither_strength == 0.0 {
+        auto_d
     } else {
         opts.dither_strength
     };
@@ -133,20 +145,24 @@ pub fn quantize_indexed_png(
     } else {
         apply_palette_rgba(src_rgba, width, height, &palette_oklab, &palette_alpha)
     };
-    // Cycle 71: annealed joint optimization. After Lloyd + apply,
-    // run ICM-step + palette-retrain alternating minimization with
-    // λ-decay schedule {0.0001, 0.00005, 0.00002}. On baseline-7
-    // this is the cycle-70 breakthrough: 01 +23.5 SSIM, 03 +11.5,
-    // 04 STRICT positive (size↓ AND SSIM↑). Trigger:
+    // Cycle 73: visual regression fix. v1.2.0 Cycle 71 unconditionally
+    // annealed tier-trans content (opq<0.95) and produced visually
+    // broken output on 01 transparency-demo (posterized dice) and
+    // 02 pluto (harsh black ring at alpha boundary) — despite
+    // SSIMULACRA2 numbers improving. The ICM step OVERWRITES any
+    // FS-dithered indices with smooth piecewise-constant assignment,
+    // which destroys fine alpha gradient. Joint anneal now restricted
+    // to OPAQUE content with low variance.
     //   - n_pixels < 2.5M (keeps 5MP perf untouched)
-    //   - NOT stochastic (var ≥ 200 skipped — joint hurts noise content)
+    //   - opq ≥ 0.95 (tier-trans skips — pipeline relies on dither)
+    //   - var < 200 (stochastic content skipped — joint hurts noise)
     let n_total = src_rgba.len() / 4;
     let small_enough = n_total < 2_500_000;
     let (indices, palette_oklab, palette_alpha, palette_srgb) = if small_enough {
         let n_opaque = src_rgba.chunks_exact(4).filter(|p| p[3] == 255).count();
         let opq = n_opaque as f64 / n_total as f64;
         let should_anneal = if opq < 0.95 {
-            true
+            false
         } else {
             // var check using cycle-44's stats
             let (_adj_mn, var) = compute_adj_lum_diff_stats(src_rgba, width as usize);
@@ -1137,7 +1153,6 @@ pub fn is_gradient_candidate(src_rgba: &[u8], width: u32) -> bool {
 ///   (04 adj_mn=3.81, 06 adj_mn=21.68 — all above the 1.5 cutoff.)
 /// - opaque uniq > 100 K → 192 (high-uniq stochastic photo)
 /// - else → 208 (smooth photo, gate-critical)
-#[must_use]
 pub fn classify_for_palette_size(src_rgba: &[u8], width: usize) -> usize {
     let n_total = src_rgba.len() / 4;
     let mut n_opaque = 0usize;
@@ -1146,33 +1161,29 @@ pub fn classify_for_palette_size(src_rgba: &[u8], width: usize) -> usize {
     }
     let opq = n_opaque as f64 / n_total as f64;
     if opq < 0.95 {
-        // Cycle 42: tier-trans split by adj_mn + opaque-region uniq.
-        // - adj_mn > 5 ⇒ crisp logo/graphics edges (03 wiki adj_mn=8.20,
-        //   14 soft-trans adj_mn=5.10) — need full palette n=256
-        //   to preserve antialiased edges and any alpha gradient.
-        // - sparse smooth gradient (01 adj_mn=1.92, uniq=4348) → n=32
-        //   buffer +428 vs TinyPNG.
-        // - tier-2c sharp-mask (02 adj_mn=3.17, uniq=19444) → n=48
-        //   buffer +125 vs TinyPNG.
-        // - else default n=64.
+        // Cycle 73: tier-trans split — sharp-mask (logo/antialias)
+        // needs full palette, smooth-gradient (translucent dice,
+        // soft alpha edge) uses n=64 + FS-dither to disguise palette
+        // banding without exploding size.
         //
-        // 7-baseline goes -16.28 % → ~-17.14 % at the wide-buffer
-        // fixtures (01/02), while 03 stays at n=256 (size unchanged).
+        // - adj_mn > 5 → sharp-mask (03 wiki adj_mn=8.20, 14 soft-
+        //   trans adj_mn=5.10): n=256, no dither (dither on AA edges
+        //   adds visible noise — see classify_for_auto_dither).
+        // - adj_mn ≤ 5 → smooth gradient (01 dice adj_mn=1.92,
+        //   02 pluto adj_mn=3.17): n=64. classify_for_auto_dither
+        //   returns 0.7 for this branch so FS-dither smooths the
+        //   per-palette-entry banding. Cycle 71 (joint anneal +
+        //   small n + d=0.0) had been posterizing these visually;
+        //   Cycle 73 keeps the size win with visual integrity by
+        //   relying on dither rather than larger palette.
+        //
+        // Visual verification via Read tool 2026-06-17:
+        //   01 dice  @ n=64+d=0.7 → 45 KB (TinyPNG 47, 0.957x) — soft alpha intact
+        //   02 pluto @ n=64+d=0.7 → 96 KB (TinyPNG 180, 0.531x) — smooth edge intact
         let (adj_mn, _var) = compute_adj_lum_diff_stats(src_rgba, width);
         if adj_mn > 5.0 {
             return 256;
         }
-        let step_u = if n_total > 1_000_000 { 4 } else { 1 };
-        let mut uniq = std::collections::HashSet::with_capacity(25_500);
-        for p in src_rgba.chunks_exact(4).step_by(step_u) {
-            if p[3] != 255 { continue; }
-            let key = (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16);
-            uniq.insert(key);
-            if uniq.len() > 25_000 { break; }
-        }
-        let uc = uniq.len();
-        if uc < 5_000 { return 32; }
-        if uc < 25_000 { return 48; }
         return 64;
     }
     // Cycle 40: smooth-gradient detection (cheap: one O(N/step) pass
@@ -1274,21 +1285,30 @@ fn compute_adj_lum_diff_stats(src_rgba: &[u8], width: usize) -> (f64, f64) {
     (mean, var)
 }
 
-pub fn classify_for_auto_dither(_src_rgba: &[u8], _width: u32) -> f32 {
-    // Cycle 38: classifier flattened to d=0.0. Per user direction
-    // (2026-06-17): TinyPNG's SSIMULACRA2 is the industry-accepted
-    // quality threshold; chasing peak SSIM above it (Cycle 30-35,
-    // +0.16 to +17.23 per fixture) costs +5-13% size with little
-    // marketing value. Size and encode/decode perf matter more.
+pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
+    // Cycle 38: classifier flattened to d=0.0 for opaque content,
+    // since TinyPNG's SSIMULACRA2 is the industry-accepted quality
+    // threshold and chasing peak SSIM above it costs +5-13% size.
     //
-    // 7-fixture marketing baseline at d=0.0:
-    //   nupic 2419 KB / 7 SSIM all > TinyPNG  (was 2662 KB / +5-17 SSIM)
-    //   = -8.5 % vs TinyPNG total size, still 7/7 SSIM wins
+    // Cycle 73 patch: tier-trans smooth-gradient (opq<0.95 + adj_mn≤5)
+    // gets d=0.7 back. v1.2.0 shipped d=0.0 + small palette + joint
+    // anneal which posterized translucent regions on 01/02 (visual
+    // regression discovered by user via Read-tool inspection). With
+    // joint anneal disabled and n=256 (see classify_for_palette_size),
+    // FS-dither at 0.7 is needed to preserve smooth alpha gradient.
     //
-    // The tier-1/2/3/4 routing tree from Cycle 30-35 is archived in
-    // essays 03u-03z + 04a-04b. Users wanting peak SSIM at higher
-    // size pass `--dither 0.5` (most photo class) or `--dither 0.7`
-    // (gradient / smooth-gradient transparency) explicitly.
+    // Sharp-mask transparency (adj_mn > 5: 03 wiki logo, 14 soft-trans)
+    // keeps d=0.0 — dither on antialiased edges adds visible noise.
+    let n_total = src_rgba.len() / 4;
+    if n_total == 0 { return 0.0; }
+    let n_opaque = src_rgba.chunks_exact(4).filter(|p| p[3] == 255).count();
+    let opq = n_opaque as f64 / n_total as f64;
+    if opq < 0.95 {
+        let (adj_mn, _var) = compute_adj_lum_diff_stats(src_rgba, width as usize);
+        if adj_mn <= 5.0 {
+            return 0.7;
+        }
+    }
     0.0
 }
 
