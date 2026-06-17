@@ -1161,30 +1161,42 @@ pub fn classify_for_palette_size(src_rgba: &[u8], width: usize) -> usize {
     }
     let opq = n_opaque as f64 / n_total as f64;
     if opq < 0.95 {
-        // Cycle 73: tier-trans split — sharp-mask (logo/antialias)
-        // needs full palette, smooth-gradient (translucent dice,
-        // soft alpha edge) uses n=64 + FS-dither to disguise palette
-        // banding without exploding size.
+        // Cycle 75: tier-trans 3-way split by adj_mn + uniq_opq.
         //
-        // - adj_mn > 5 → sharp-mask (03 wiki adj_mn=8.20, 14 soft-
-        //   trans adj_mn=5.10): n=256, no dither (dither on AA edges
-        //   adds visible noise — see classify_for_auto_dither).
-        // - adj_mn ≤ 5 → smooth gradient (01 dice adj_mn=1.92,
-        //   02 pluto adj_mn=3.17): n=64. classify_for_auto_dither
-        //   returns 0.7 for this branch so FS-dither smooths the
-        //   per-palette-entry banding. Cycle 71 (joint anneal +
-        //   small n + d=0.0) had been posterizing these visually;
-        //   Cycle 73 keeps the size win with visual integrity by
-        //   relying on dither rather than larger palette.
+        // adj_mn > 5         → sharp-mask logo (03 wiki adj_mn=8.20,
+        //                       14 soft-trans adj_mn=5.10): n=256,
+        //                       no dither (dither on AA edges noises)
+        // adj_mn ≤ 5
+        //   + uniq_opq < 5000 → translucent overlay (01 dice
+        //                       uniq_opq=4348, 14 puppy uniq_opq=2529):
+        //                       n=64 + d=0.7 — many alpha-blended
+        //                       smooth tones need palette anchors
+        //   + uniq_opq ≥ 5000 → photo + alpha edge (02 pluto
+        //                       uniq_opq=19444, 21 earth 142K,
+        //                       22 tree 55K, 23 statue 72K):
+        //                       n=32 + d=0.7 — single-texture-photo,
+        //                       dither carries tonal continuity at
+        //                       smaller palette, big size win
         //
-        // Visual verification via Read tool 2026-06-17:
-        //   01 dice  @ n=64+d=0.7 → 45 KB (TinyPNG 47, 0.957x) — soft alpha intact
-        //   02 pluto @ n=64+d=0.7 → 96 KB (TinyPNG 180, 0.531x) — smooth edge intact
+        // Visual verification 2026-06-17:
+        //   01 dice  @ n=64+d=0.7 → 45 KB (visually pristine)
+        //   02 pluto @ n=32+d=0.7 → 59 KB (visually pristine, -38 KB)
+        //   21 earth @ n=32+d=0.7 → 530 KB (-360 KB visually unchanged)
+        //   22 tree  @ n=32+d=0.7 → 710 KB (-150 KB)
+        //   23 statue @ n=32+d=0.7 → 157 KB (-60 KB)
         let (adj_mn, _var) = compute_adj_lum_diff_stats(src_rgba, width);
         if adj_mn > 5.0 {
             return 256;
         }
-        return 64;
+        let step_u = if n_total > 1_000_000 { 4 } else { 1 };
+        let mut uniq = std::collections::HashSet::with_capacity(5_500);
+        for p in src_rgba.chunks_exact(4).step_by(step_u) {
+            if p[3] != 255 { continue; }
+            let key = (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16);
+            uniq.insert(key);
+            if uniq.len() >= 5_000 { return 32; } // photo+edge
+        }
+        return 64; // translucent overlay
     }
     // Cycle 40: smooth-gradient detection (cheap: one O(N/step) pass
     // computing adj_mn + var on a sub-sampled row grid).
