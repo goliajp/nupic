@@ -134,7 +134,17 @@ pub fn quantize_indexed_png(
         Some(palette_alpha.as_slice())
     };
     let raw = encode_indexed_png_with_alpha(width, height, &indices, &palette_srgb, trns_opt)?;
-    let preset = opts.oxipng_preset.min(6);
+    // Cycle 47: adaptive oxipng preset for large images. preset=5
+    // on 5MP+ images costs 1.5-2 s for only +0.1-0.9 % size benefit
+    // vs preset=1; on small fixtures (baseline-7) preset=5 gives
+    // 4-7 % smaller. Switch to preset=1 when image is ≥ 5 MP.
+    let n_pixels = (width as usize) * (height as usize);
+    let preset_default = if n_pixels >= 5_000_000 { 1 } else { opts.oxipng_preset.min(6) };
+    let preset = if opts.oxipng_preset != QuantizeOpts::default().oxipng_preset {
+        opts.oxipng_preset.min(6) // user explicit override
+    } else {
+        preset_default
+    };
     let mut oxipng_opts = oxipng::Options::from_preset(preset);
     if opts.strip_metadata {
         oxipng_opts.strip = oxipng::StripChunks::Safe;
