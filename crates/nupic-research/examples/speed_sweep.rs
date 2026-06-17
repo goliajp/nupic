@@ -1,106 +1,87 @@
-//! Cycle 57 — Comparison: nupic full pipeline vs imagequant standalone
-//! Paper P1 material: Table 1 of GoliaPNG benchmark.
+//! Cycle 58 — Palette index re-ordering experiment (P3 paper prototype)
+//! Hypothesis: sorting palette by index frequency (desc) skews
+//! distribution toward low indices, improves deflate compression.
 
 use std::path::PathBuf;
 use std::process::Command;
 use image::ImageReader;
 use rgb::Rgb;
+use nupic_quantize::{
+    train_palette_rgba, refine_palette_kmeans_importance, refine_palette_kmeans,
+    apply_palette_rgba, encode_indexed_png_with_alpha,
+    classify_for_palette_size_with_importance,
+};
 
-// Path A: full nupic pipeline (current production)
-fn nupic_pipeline(in_path: &PathBuf, out_path: &PathBuf) -> anyhow::Result<()> {
-    let nupic = PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().join("target/release/nupic");
-    Command::new(&nupic).args(["compress", "-o"]).arg(out_path).args(["--dither", "auto"]).arg(in_path).status()?;
-    Ok(())
+fn reorder_by_frequency(indices: &[u8], palette: &[Rgb<u8>], alpha: &[u8]) -> (Vec<u8>, Vec<Rgb<u8>>, Vec<u8>) {
+    let n = palette.len();
+    let mut counts = vec![0u32; n];
+    for &i in indices { counts[i as usize] += 1; }
+    // Permutation: order by count descending
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(counts[i]));
+    // inv_map[old_idx] = new_idx
+    let mut inv_map = vec![0u8; n];
+    for (new_i, &old_i) in order.iter().enumerate() { inv_map[old_i] = new_i as u8; }
+    let new_indices: Vec<u8> = indices.iter().map(|&i| inv_map[i as usize]).collect();
+    let new_palette: Vec<Rgb<u8>> = order.iter().map(|&old_i| palette[old_i]).collect();
+    let new_alpha: Vec<u8> = order.iter().map(|&old_i| alpha[old_i]).collect();
+    (new_indices, new_palette, new_alpha)
 }
 
-// Path B: imagequant standalone (Lab L2 + FS dither, default)
-fn imagequant_pipeline(in_path: &PathBuf, out_path: &PathBuf) -> anyhow::Result<()> {
-    let img = ImageReader::open(in_path)?.with_guessed_format()?.decode()?;
+fn pipeline(p: &PathBuf, reorder: bool) -> anyhow::Result<usize> {
+    let img = ImageReader::open(p)?.with_guessed_format()?.decode()?;
     let r = img.to_rgba8();
     let w = r.width(); let h = r.height();
-    let raw = r.into_raw();
-    let pixels: &[rgb::RGBA8] = unsafe { std::slice::from_raw_parts(raw.as_ptr() as *const rgb::RGBA8, raw.len() / 4) };
-
-    let mut attrs = imagequant::new();
-    attrs.set_quality(0, 95)?;
-    attrs.set_speed(4)?;
-    attrs.set_max_colors(256)?;
-    let mut img2 = attrs.new_image(pixels, w as usize, h as usize, 0.0)?;
-    let mut quant = attrs.quantize(&mut img2)?;
-    let _ = quant.set_dithering_level(1.0); // default Floyd-Steinberg
-    let (palette, indices) = quant.remapped(&mut img2)?;
-
-    // Build raw PNG via png crate
-    let mut rgb_palette: Vec<u8> = Vec::with_capacity(palette.len() * 3);
-    let mut alpha_vec: Vec<u8> = Vec::with_capacity(palette.len());
-    for c in &palette { rgb_palette.push(c.r); rgb_palette.push(c.g); rgb_palette.push(c.b); alpha_vec.push(c.a); }
-    let last_nonopaque = alpha_vec.iter().rposition(|&v| v != 255);
-    let trns = last_nonopaque.map(|i| alpha_vec[..=i].to_vec());
-
-    let mut raw_png = Vec::new();
-    {
-        let mut enc = png::Encoder::new(&mut raw_png, w, h);
-        enc.set_color(png::ColorType::Indexed);
-        enc.set_depth(png::BitDepth::Eight);
-        enc.set_palette(rgb_palette);
-        enc.set_compression(png::Compression::Fast);
-        if let Some(t) = trns.as_ref() { if !t.is_empty() { enc.set_trns(t.clone()); } }
-        let mut writer = enc.write_header()?;
-        writer.write_image_data(&indices)?;
-    }
-    // Same oxipng as nupic pipeline (preset=1 if 5MP, else 5)
+    let raw_rgba = r.into_raw();
+    let (n_colors, alpha_imp) = classify_for_palette_size_with_importance(&raw_rgba, w as usize);
+    let (pi, ai) = train_palette_rgba(&raw_rgba, w, h, n_colors)?;
     let n_pix = (w as usize) * (h as usize);
+    let refine_cap = if n_pix >= 5_000_000 { 20 } else { 100 };
+    let (pal, alpha) = if alpha_imp > 0.0 {
+        refine_palette_kmeans_importance(&raw_rgba, w, h, &pi, &ai, refine_cap, alpha_imp)
+    } else {
+        refine_palette_kmeans(&raw_rgba, w, h, &pi, &ai, refine_cap)
+    };
+    let (mut indices, mut palette_srgb) = apply_palette_rgba(&raw_rgba, w, h, &pal, &alpha);
+    let mut alpha_vec = alpha.clone();
+    if reorder {
+        let (i, p, a) = reorder_by_frequency(&indices, &palette_srgb, &alpha_vec);
+        indices = i; palette_srgb = p; alpha_vec = a;
+    }
+    let trns = if alpha_vec.iter().all(|&a| a == 255) { None } else { Some(alpha_vec.as_slice()) };
+    let raw_png = encode_indexed_png_with_alpha(w, h, &indices, &palette_srgb, trns)?;
     let preset = if n_pix >= 5_000_000 { 1 } else { 5 };
     let mut o = oxipng::Options::from_preset(preset);
     o.strip = oxipng::StripChunks::Safe;
     let out = oxipng::optimize_from_memory(&raw_png, &o).unwrap();
-    std::fs::write(out_path, out)?;
-    Ok(())
-}
-
-fn ssim(input: &PathBuf, encoded: &PathBuf) -> f64 {
-    let nupic = PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().join("target/release/nupic");
-    let cmd = Command::new(&nupic).args(["compare", "-m", "ssimulacra2"]).arg(input).arg(encoded).output();
-    if let Ok(o) = cmd {
-        let s = String::from_utf8_lossy(&o.stdout);
-        s.lines().find_map(|l| l.strip_prefix("SSIMULACRA2: ").and_then(|v| v.split_whitespace().next()).and_then(|n| n.parse().ok())).unwrap_or(f64::NAN)
-    } else { f64::NAN }
+    Ok(out.len())
 }
 
 fn main() -> anyhow::Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf();
-    let tmp = std::env::temp_dir();
     let fixtures: &[(&str, &str)] = &[
-        ("inputs/01-png-transparency-demo.png", "01 trans"),
-        ("inputs/02-pluto-transparent.png", "02 pluto"),
-        ("inputs/03-wikipedia-logo.png", "03 wiki"),
         ("inputs/04-photo-portrait.png", "04 portrait"),
         ("inputs/05-photo-mountain.png", "05 mountain"),
         ("inputs/06-photo-landscape.png", "06 landscape"),
         ("inputs/07-photo-product.png", "07 product"),
-        ("inputs-ext-real/17-aurora-5mp.png", "17 aurora"),
-        ("inputs-ext-real/25-sofia-cathedral-5mp.png", "25 sofia"),
-        ("inputs-ext-real/27-whale-tail-5mp.png", "27 whale"),
+        ("inputs-ext-real/17-aurora-5mp.png", "17 aurora 5MP"),
+        ("inputs-ext-real/25-sofia-cathedral-5mp.png", "25 sofia 5MP"),
+        ("inputs-ext-real/27-whale-tail-5mp.png", "27 whale 5MP"),
     ];
-    println!("=== Cycle 57: nupic full pipeline vs imagequant standalone ===");
-    println!("{:<15} {:>13} {:>13} {:>10}", "fixture", "nupic KB/SSIM", "iq KB/SSIM", "n_ratio");
-    let mut sum_nup = 0u64; let mut sum_iq = 0u64;
+    println!("=== Cycle 58 — palette index re-ordering by frequency ===");
+    println!("{:<18} {:>12} {:>14} {:>10}", "fixture", "baseline_KB", "reordered_KB", "Δ%");
+    let mut sum_b = 0; let mut sum_r = 0;
     for &(rel, lbl) in fixtures {
         let p = root.join("assets/png-bench").join(rel);
-        let np = tmp.join(format!("c57_n_{}.png", lbl.replace(' ', "_")));
-        let ip = tmp.join(format!("c57_i_{}.png", lbl.replace(' ', "_")));
-        nupic_pipeline(&p, &np)?;
-        imagequant_pipeline(&p, &ip)?;
-        let nss = ssim(&p, &np);
-        let iss = ssim(&p, &ip);
-        let ns = std::fs::metadata(&np)?.len();
-        let is_ = std::fs::metadata(&ip)?.len();
-        sum_nup += ns; sum_iq += is_;
-        println!("{:<15} {:>5.0}/{:.1}   {:>5.0}/{:.1}   {:.3}",
-            lbl, ns as f64/1024.0, nss, is_ as f64/1024.0, iss, ns as f64 / is_ as f64);
+        let sz_base = pipeline(&p, false)?;
+        let sz_re = pipeline(&p, true)?;
+        sum_b += sz_base; sum_r += sz_re;
+        let pct = (sz_re as f64 / sz_base as f64 - 1.0) * 100.0;
+        println!("{:<18} {:>12.0} {:>14.0} {:>+9.2}%",
+            lbl, sz_base as f64/1024.0, sz_re as f64/1024.0, pct);
     }
     println!();
-    println!("TOTAL: nupic={:.0}KB, iq={:.0}KB, nupic/iq = {:.3} ({:+.2}%)",
-        sum_nup as f64/1024.0, sum_iq as f64/1024.0, sum_nup as f64 / sum_iq as f64, (sum_nup as f64 / sum_iq as f64 - 1.0) * 100.0);
+    println!("TOTAL: {} KB → {} KB  ({:+.2}%)",
+        sum_b/1024, sum_r/1024, (sum_r as f64 / sum_b as f64 - 1.0) * 100.0);
     Ok(())
 }
