@@ -1,9 +1,5 @@
-//! Cycle 58 — Palette index re-ordering experiment (P3 paper prototype)
-//! Hypothesis: sorting palette by index frequency (desc) skews
-//! distribution toward low indices, improves deflate compression.
-
+//! Cycle 59 — Luma-sorted palette: maybe LZ77 locality wins
 use std::path::PathBuf;
-use std::process::Command;
 use image::ImageReader;
 use rgb::Rgb;
 use nupic_quantize::{
@@ -12,14 +8,13 @@ use nupic_quantize::{
     classify_for_palette_size_with_importance,
 };
 
-fn reorder_by_frequency(indices: &[u8], palette: &[Rgb<u8>], alpha: &[u8]) -> (Vec<u8>, Vec<Rgb<u8>>, Vec<u8>) {
+fn reorder_by_luma(indices: &[u8], palette: &[Rgb<u8>], alpha: &[u8]) -> (Vec<u8>, Vec<Rgb<u8>>, Vec<u8>) {
     let n = palette.len();
-    let mut counts = vec![0u32; n];
-    for &i in indices { counts[i as usize] += 1; }
-    // Permutation: order by count descending
+    // Compute luma for each palette entry
+    let lumas: Vec<i32> = palette.iter().map(|c| (c.r as i32 + c.g as i32 + c.b as i32) / 3).collect();
+    // Permutation: order by luma ascending
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by_key(|&i| std::cmp::Reverse(counts[i]));
-    // inv_map[old_idx] = new_idx
+    order.sort_by_key(|&i| lumas[i]);
     let mut inv_map = vec![0u8; n];
     for (new_i, &old_i) in order.iter().enumerate() { inv_map[old_i] = new_i as u8; }
     let new_indices: Vec<u8> = indices.iter().map(|&i| inv_map[i as usize]).collect();
@@ -45,7 +40,7 @@ fn pipeline(p: &PathBuf, reorder: bool) -> anyhow::Result<usize> {
     let (mut indices, mut palette_srgb) = apply_palette_rgba(&raw_rgba, w, h, &pal, &alpha);
     let mut alpha_vec = alpha.clone();
     if reorder {
-        let (i, p, a) = reorder_by_frequency(&indices, &palette_srgb, &alpha_vec);
+        let (i, p, a) = reorder_by_luma(&indices, &palette_srgb, &alpha_vec);
         indices = i; palette_srgb = p; alpha_vec = a;
     }
     let trns = if alpha_vec.iter().all(|&a| a == 255) { None } else { Some(alpha_vec.as_slice()) };
@@ -68,8 +63,8 @@ fn main() -> anyhow::Result<()> {
         ("inputs-ext-real/25-sofia-cathedral-5mp.png", "25 sofia 5MP"),
         ("inputs-ext-real/27-whale-tail-5mp.png", "27 whale 5MP"),
     ];
-    println!("=== Cycle 58 — palette index re-ordering by frequency ===");
-    println!("{:<18} {:>12} {:>14} {:>10}", "fixture", "baseline_KB", "reordered_KB", "Δ%");
+    println!("=== Cycle 59 — luma-sorted palette ===");
+    println!("{:<18} {:>12} {:>14} {:>10}", "fixture", "baseline_KB", "luma_sort_KB", "Δ%");
     let mut sum_b = 0; let mut sum_r = 0;
     for &(rel, lbl) in fixtures {
         let p = root.join("assets/png-bench").join(rel);
