@@ -89,7 +89,8 @@ fn process(src_path: &Path) -> Result<(String, usize, usize, usize, usize, usize
         oxipng_preset: 5,
         strip_metadata: true,
         dither_strength: 0.0,
-    };
+            ..Default::default()
+        };
     let path_a = quantize_indexed_png(&raw, w, h, path_a_opts)
         .map_err(|e| anyhow::anyhow!("{e:?}"))?;
     let size_a = path_a.len();

@@ -270,7 +270,8 @@ fn process_variant_e(
         oxipng_preset: 5,
         strip_metadata: true,
         dither_strength: 0.0,
-    };
+            ..Default::default()
+        };
     let _ = opts;
     Ok((png_no, png_e))
 }

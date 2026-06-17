@@ -31,7 +31,8 @@ fn enc(raw: &[u8], w: u32, h: u32, strength: f32, src: &Path, tmpdir: &Path, lab
     let opts = QuantizeOpts {
         n_colors: 256, oxipng_preset: 5, strip_metadata: true,
         dither_strength: strength,
-    };
+            ..Default::default()
+        };
     let png = quantize_indexed_png(raw, w, h, opts).map_err(|e| anyhow::anyhow!("{e:?}"))?;
     let out = tmpdir.join(format!("{label}.png"));
     std::fs::write(&out, &png)?;

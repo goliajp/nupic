@@ -54,7 +54,8 @@ fn ground_truth_filtered_rows(src: &Path) -> Result<Vec<u8>> {
         oxipng_preset: 5,
         strip_metadata: true,
         dither_strength: 0.0,
-    };
+            ..Default::default()
+        };
     let path_a_png = quantize_indexed_png(&raw, w, h, opts).map_err(|e| anyhow::anyhow!("{e:?}"))?;
     let idat = extract_idat(&path_a_png)?;
     let mut decoder = ZlibDecoder::new(&idat[..]);
@@ -88,7 +89,8 @@ fn main() -> Result<()> {
                 oxipng_preset: 5,
                 strip_metadata: true,
                 dither_strength: 0.0,
-            };
+            ..Default::default()
+        };
             quantize_indexed_png(&raw, w, h, opts).map_err(|e| anyhow::anyhow!("{e:?}"))?
         };
         let idat_a = extract_idat(&path_a_png)?;

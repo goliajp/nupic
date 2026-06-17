@@ -65,7 +65,8 @@ fn main() -> Result<()> {
                 oxipng_preset: 5,
                 strip_metadata: true,
                 dither_strength: dither,
-            };
+            ..Default::default()
+        };
             let png = quantize_indexed_png(&raw, w, h, opts).map_err(|e| anyhow::anyhow!("{e:?}"))?;
             let out = tmpdir.join(format!("c{}_d{:.2}.png", n_colors, dither));
             std::fs::write(&out, &png)?;
