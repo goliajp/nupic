@@ -419,24 +419,71 @@ pub fn refine_palette_kmeans_importance(
     let mut palette = palette_oklab.to_vec();
     let mut alpha = palette_alpha.to_vec();
     let mut assigned = vec![0u8; pixels.len()];
+    // Cycle 45: SoA palette for SIMD-friendly access. Padded to k_pad
+    // (multiple of 4) so f32x4 batched loads don't need bounds checks.
+    let k_pad = (k + 3) & !3;
+    let mut pal_l: Vec<f32> = Vec::with_capacity(k_pad);
+    let mut pal_a: Vec<f32> = Vec::with_capacity(k_pad);
+    let mut pal_b: Vec<f32> = Vec::with_capacity(k_pad);
+    let mut pal_as: Vec<f32> = Vec::with_capacity(k_pad);
+    pal_l.resize(k_pad, f32::INFINITY); // dummy entries → d2 = ∞
+    pal_a.resize(k_pad, f32::INFINITY);
+    pal_b.resize(k_pad, f32::INFINITY);
+    pal_as.resize(k_pad, f32::INFINITY);
     for _ in 0..n_iters {
+        // Refresh SoA palette from AoS palette each iter
+        for j in 0..k {
+            pal_l[j] = palette[j].l;
+            pal_a[j] = palette[j].a;
+            pal_b[j] = palette[j].b;
+            pal_as[j] = alpha[j] as f32 * ALPHA_SCALE_C;
+        }
         const CHUNK: usize = 8192;
-        let pal_ref: &[Oklab] = &palette;
-        let alpha_ref: &[u8] = &alpha;
+        let pl_ref: &[f32] = &pal_l;
+        let pa_ref: &[f32] = &pal_a;
+        let pb_ref: &[f32] = &pal_b;
+        let pas_ref: &[f32] = &pal_as;
         pixels.par_chunks(CHUNK).zip(assigned.par_chunks_mut(CHUNK))
             .for_each(|(chunk, out)| {
+                use wide::{f32x4, CmpLt};
                 for (pi, &(pl, pa_l, pb, pa_alpha, _w)) in chunk.iter().enumerate() {
-                    let mut best_j = 0; let mut best_d2 = f32::INFINITY;
-                    for j in 0..k {
-                        let pj = pal_ref[j];
-                        let dl = pl - pj.l;
-                        let da = pa_l - pj.a;
-                        let db = pb - pj.b;
-                        let d_alpha = (pa_alpha as i32 - alpha_ref[j] as i32) as f32 * ALPHA_SCALE_C;
-                        let d2 = dl.mul_add(dl, da.mul_add(da, db.mul_add(db, d_alpha * d_alpha)));
-                        if d2 < best_d2 { best_d2 = d2; best_j = j; }
+                    let px_l = f32x4::splat(pl);
+                    let px_a = f32x4::splat(pa_l);
+                    let px_b = f32x4::splat(pb);
+                    let px_as = f32x4::splat(pa_alpha as f32 * ALPHA_SCALE_C);
+                    let mut min_d2 = f32x4::splat(f32::INFINITY);
+                    let mut min_idx = f32x4::from([0.0, 1.0, 2.0, 3.0]);
+                    let four = f32x4::splat(4.0);
+                    let mut idx_iter = f32x4::from([0.0, 1.0, 2.0, 3.0]);
+                    let mut j = 0;
+                    while j < k_pad {
+                        let pj_l: f32x4 = f32x4::new([pl_ref[j], pl_ref[j+1], pl_ref[j+2], pl_ref[j+3]]);
+                        let pj_a: f32x4 = f32x4::new([pa_ref[j], pa_ref[j+1], pa_ref[j+2], pa_ref[j+3]]);
+                        let pj_b: f32x4 = f32x4::new([pb_ref[j], pb_ref[j+1], pb_ref[j+2], pb_ref[j+3]]);
+                        let pj_as: f32x4 = f32x4::new([pas_ref[j], pas_ref[j+1], pas_ref[j+2], pas_ref[j+3]]);
+                        let dl = px_l - pj_l;
+                        let da = px_a - pj_a;
+                        let db = px_b - pj_b;
+                        let das = px_as - pj_as;
+                        let d2 = dl*dl + da*da + db*db + das*das;
+                        // mask: lanes where d2 < min_d2
+                        let mask = d2.cmp_lt(min_d2);
+                        min_d2 = mask.blend(d2, min_d2);
+                        min_idx = mask.blend(idx_iter, min_idx);
+                        idx_iter += four;
+                        j += 4;
                     }
-                    out[pi] = best_j as u8;
+                    // Horizontal min across 4 lanes
+                    let d2_arr: [f32; 4] = min_d2.to_array();
+                    let idx_arr: [f32; 4] = min_idx.to_array();
+                    let mut bj = 0usize; let mut bd2 = f32::INFINITY;
+                    for lane in 0..4 {
+                        if d2_arr[lane] < bd2 {
+                            bd2 = d2_arr[lane];
+                            bj = idx_arr[lane] as usize;
+                        }
+                    }
+                    out[pi] = bj as u8;
                 }
             });
         // Weighted centroid update
