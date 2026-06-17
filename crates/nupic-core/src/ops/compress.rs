@@ -206,6 +206,16 @@ fn encode_png_stone_c(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     //   palette quantize + d=0.7  = 497 KB / SSIMULACRA2 68.08
     //   lossless                  =  53 KB / SSIMULACRA2 100.00
     if nupic_quantize::is_gradient_candidate(&raw, w) {
+        // Cycle 62: when Auto routes gradient content to lossless on
+        // large images, downgrade oxipng preset to keep latency
+        // bounded. Explicit `Quality::Lossless` users still get
+        // preset=5 (size-priority) — this only affects Auto-gradient.
+        let n_pixels = (w as usize) * (h as usize);
+        if n_pixels >= 5_000_000 && opts.effort == 5 {
+            let mut auto_opts = opts.clone();
+            auto_opts.effort = 1;
+            return encode_png_lossless(img, &auto_opts);
+        }
         return encode_png_lossless(img, opts);
     }
     // Cycle 39: size-priority routing — adaptive palette size per
@@ -270,6 +280,9 @@ fn encode_png_lossless(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     let mut raw = Vec::new();
     img.inner()
         .write_to(&mut Cursor::new(&mut raw), image::ImageFormat::Png)?;
+    // Cycle 62: caller (encode_png_stone_c for Auto + gradient routing)
+    // is responsible for downgrading effort on large images;
+    // Quality::Lossless preserves user-requested preset=5 here.
     oxipng_optimize(&raw, opts)
 }
 
