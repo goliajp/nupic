@@ -100,7 +100,14 @@ pub fn quantize_indexed_png(
     // well within TinyPNG-gate buffer on 25/27. Smaller images keep
     // cap=100 to preserve baseline-7 marketing accuracy.
     let n_pixels = (width as usize) * (height as usize);
-    let refine_cap = if n_pixels >= 5_000_000 { 20 } else { DEFAULT_REFINE_ITERS };
+    // Cycle 79: 3-tier Lloyd iter cap to hit NAS/CDN < 250ms KPI:
+    //   ≥ 5MP → cap=10  (small SSIM cost ≤ 1.8 per c78 sweep,
+    //                    saves ~100ms vs cap=20 on 5-15 MP)
+    //   2-5MP → cap=30  (Cycle 78 sweep showed plateau ~30)
+    //   < 2MP → cap=100 (Cycle 17, baseline-7 fixtures, perf budget OK)
+    let refine_cap = if n_pixels >= 5_000_000 { 10 }
+        else if n_pixels >= 2_000_000 { 30 }
+        else { DEFAULT_REFINE_ITERS };
     (palette_oklab, palette_alpha) = if opts.importance_alpha > 0.0 {
         refine_palette_kmeans_importance(
             src_rgba, width, height,
@@ -277,7 +284,14 @@ pub fn quantize_indexed_png(
     // preset=3/4/5 produce IDENTICAL size while preset=3 is 4-12 %
     // faster. preset=2 starts to hurt size on landscape fixtures.
     let n_pixels = (width as usize) * (height as usize);
-    let preset_default = if n_pixels >= 5_000_000 { 1 } else { 3 };
+    // Cycle 79: 3-tier preset for NAS/CDN < 250ms KPI:
+    //   ≥ 5MP → preset=0 (~150-350 ms oxipng, +5-15 % size vs preset=1)
+    //   2-5MP → preset=1 (~200-700 ms, balanced)
+    //   < 2MP → preset=3 (baseline-7 fixtures, perf budget OK)
+    // Pre-Cycle 79: 5MP+ preset=1 = 500-1400 ms (oxipng dominated 55-76%).
+    let preset_default = if n_pixels >= 5_000_000 { 0 }
+        else if n_pixels >= 2_000_000 { 1 }
+        else { 3 };
     let preset = if opts.oxipng_preset != QuantizeOpts::default().oxipng_preset {
         opts.oxipng_preset.min(6) // user explicit override
     } else {
