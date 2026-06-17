@@ -1095,6 +1095,17 @@ pub fn classify_for_palette_size(src_rgba: &[u8], width: usize) -> usize {
     if adj_mn < 1.5 && var < 20.0 && uniq_count > 75_000 {
         return 256; // tier-4d-rich: smooth-gradient photo with many colors
     }
+    // Cycle 64: widened detector for "smooth-detail uniq-rich" outliers.
+    // Cycle 61 corpus bench surfaced 4-5 fixtures (NASA mars/astronaut,
+    // Wikimedia high-res, picsum 3840x2560) with SSIM 54-58 at n=208.
+    // Their signature: uniq > 75K (many colors), var < 150 (smooth-ish
+    // content), adj_mn 2-7 (gentle gradients with mid-frequency detail).
+    // Bumping these to n=256 recovers +4-7 SSIM at +5-10% size cost.
+    // Baseline-7 unaffected: 04 (uniq=25K<75K), 06 (var=663>150), 07
+    // (uniq=25K<75K).
+    if adj_mn < 5.0 && var < 150.0 && uniq_count > 75_000 {
+        return 256;
+    }
     if uniq_count > 100_000 {
         // Cycle 41: split high-uniq by variance. var > 200 ⇒ truly
         // stochastic content (e.g. 05 mountain var=320) where palette
