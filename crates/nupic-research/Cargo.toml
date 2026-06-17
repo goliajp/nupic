@@ -36,3 +36,5 @@ fast-srgb8 = { workspace = true }
 wide = { workspace = true }
 yuvxyb = { workspace = true }
 rayon = { workspace = true }
+libc = "0.2"
+gif = "0.14"
