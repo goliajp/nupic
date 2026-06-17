@@ -332,8 +332,13 @@ pub fn refine_palette_kmeans(
     // corpus showed stride=8 is net SSIM-positive (+0.24 avg) AND
     // -84 % refine time (~10s → ~1.5s on 5MP). Full-pixel Lloyd was
     // over-fitting to noise; subsample acts as regulariser.
+    //
+    // Cycle 46: for 5MP+ images, bump stride to 16 — refine time cut
+    // ~50 % at small SSIM cost (well within gate buffers).
+    let n_pixels = (width as usize) * (height as usize);
+    let stride = if n_pixels >= 5_000_000 { 16 } else { 8 };
     let (pal, alpha, _iters_run) = refine_palette_kmeans_instrumented_strided(
-        src_rgba, width, height, palette_oklab, palette_alpha, n_iters, 0.0005, 8,
+        src_rgba, width, height, palette_oklab, palette_alpha, n_iters, 0.0005, stride,
     );
     (pal, alpha)
 }
@@ -373,7 +378,12 @@ pub fn refine_palette_kmeans_importance(
     const ALPHA_WEIGHT_C: f32 = 2.0;
     const ALPHA_SCALE_C: f32 = ALPHA_WEIGHT_C / 255.0;
     const EPS_SQ: f32 = 0.0005 * 0.0005;
-    const STRIDE: usize = 8;
+    // Cycle 46: adaptive stride for large images. Stride=8 default
+    // (Cycle 37); for 5MP+ images bump to stride=16. Per Cycle 37
+    // sweep, stride=16 costs ~0.2-1.1 SSIM but cuts refine time ~50 %.
+    // Large fixtures all have huge SSIM buffer vs TinyPNG (5+ pts),
+    // so the SSIM loss is well within gate.
+    let stride: usize = if n_pixels >= 5_000_000 { 16 } else { 8 };
 
     // Precompute weights for every pixel from row+col luma diff at
     // scales {1, 2}.
@@ -410,7 +420,7 @@ pub fn refine_palette_kmeans_importance(
         .par_chunks_exact(4)
         .enumerate()
         .filter_map(|(i, px)| {
-            if i % STRIDE != 0 { return None; }
+            if i % stride != 0 { return None; }
             let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
             Some((p.l, p.a, p.b, px[3], weights[i]))
         })
