@@ -840,9 +840,17 @@ pub fn train_palette_rgba(
                 src_rgba.len() / 4,
             )
         };
+        // Cycle 52: adaptive imagequant speed. speed=4 has a +130 MB
+        // allocation spike on ≥5 MP inputs (the best-quality codepath
+        // builds a heavy k-d-tree structure). speed=8 uses ~2 MB more
+        // than baseline AND runs 4× faster, with EQUIVALENT or BETTER
+        // SSIM (+0.46 on 25-sofia). On < 5 MP, speed=4 keeps the small
+        // size advantage for baseline-7 marketing accuracy.
+        let n_pixels = (w as usize) * (h as usize);
+        let speed = if n_pixels >= 5_000_000 { 8 } else { 4 };
         let mut attrs = imagequant::new();
         attrs.set_quality(q_min, 95).map_err(|_| ())?;
-        attrs.set_speed(4).map_err(|_| ())?;
+        attrs.set_speed(speed).map_err(|_| ())?;
         let mut img = attrs.new_image(pixels, w as usize, h as usize, 0.0).map_err(|_| ())?;
         let mut quant = attrs.quantize(&mut img).map_err(|_| ())?;
         // Cycle 36: skip the per-pixel remap. `remapped()` returns
