@@ -1754,33 +1754,69 @@ pub fn apply_palette_rgba(
     let k = palette_oklab.len();
     const ALPHA_WEIGHT: f32 = 2.0;
     const ALPHA_SCALE: f32 = ALPHA_WEIGHT / 255.0;
-    // Phase 3.1: precompute palette_alpha_scaled once.
-    let palette_alpha_scaled: Vec<f32> = palette_alpha
-        .iter().map(|&a| a as f32 * ALPHA_SCALE).collect();
+    // Cycle 82: SoA palette + f32x4 SIMD K-best search. Pattern
+    // mirrors refine_palette_kmeans_importance: pad k → k_pad (mod 4)
+    // with INFINITY dummies, broadcast pixel into 4 lanes, vector-load
+    // 4 palette entries per iter, mask-blend min. ~2x speedup on apply
+    // for 5MP+ inputs (n=256 → 64 SIMD steps per pixel vs 256 scalar).
+    let k_pad = (k + 3) & !3;
+    let mut pal_l: Vec<f32> = vec![f32::INFINITY; k_pad];
+    let mut pal_a: Vec<f32> = vec![f32::INFINITY; k_pad];
+    let mut pal_b: Vec<f32> = vec![f32::INFINITY; k_pad];
+    let mut pal_as: Vec<f32> = vec![f32::INFINITY; k_pad];
+    for j in 0..k {
+        pal_l[j] = palette_oklab[j].l;
+        pal_a[j] = palette_oklab[j].a;
+        pal_b[j] = palette_oklab[j].b;
+        pal_as[j] = palette_alpha[j] as f32 * ALPHA_SCALE;
+    }
+    let pl_ref: &[f32] = &pal_l;
+    let pa_ref: &[f32] = &pal_a;
+    let pb_ref: &[f32] = &pal_b;
+    let pas_ref: &[f32] = &pal_as;
     let mut indices = vec![0u8; n_pixels];
     src_rgba
         .par_chunks_exact(4)
         .zip(indices.par_chunks_exact_mut(1))
         .for_each(|(px, idx)| {
+            use wide::{f32x4, CmpLt};
             let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
-            let pa_scaled = px[3] as f32 * ALPHA_SCALE;
-            let mut best_j = 0usize;
-            let mut best_d2 = f32::INFINITY;
-            for j in 0..k {
-                let pj = palette_oklab[j];
-                let dl = p.l - pj.l;
-                let da = p.a - pj.a;
-                let db = p.b - pj.b;
-                let d_alpha = pa_scaled - palette_alpha_scaled[j];
-                let d2 = dl.mul_add(dl,
-                    da.mul_add(da,
-                        db.mul_add(db, d_alpha * d_alpha)));
-                if d2 < best_d2 {
-                    best_d2 = d2;
-                    best_j = j;
+            let px_l = f32x4::splat(p.l);
+            let px_a = f32x4::splat(p.a);
+            let px_b = f32x4::splat(p.b);
+            let px_as = f32x4::splat(px[3] as f32 * ALPHA_SCALE);
+            let mut min_d2 = f32x4::splat(f32::INFINITY);
+            let mut min_idx = f32x4::from([0.0, 1.0, 2.0, 3.0]);
+            let four = f32x4::splat(4.0);
+            let mut idx_iter = f32x4::from([0.0, 1.0, 2.0, 3.0]);
+            let mut j = 0;
+            while j < k_pad {
+                let pj_l: f32x4 = f32x4::new([pl_ref[j], pl_ref[j+1], pl_ref[j+2], pl_ref[j+3]]);
+                let pj_a: f32x4 = f32x4::new([pa_ref[j], pa_ref[j+1], pa_ref[j+2], pa_ref[j+3]]);
+                let pj_b: f32x4 = f32x4::new([pb_ref[j], pb_ref[j+1], pb_ref[j+2], pb_ref[j+3]]);
+                let pj_as: f32x4 = f32x4::new([pas_ref[j], pas_ref[j+1], pas_ref[j+2], pas_ref[j+3]]);
+                let dl = px_l - pj_l;
+                let da = px_a - pj_a;
+                let db = px_b - pj_b;
+                let das = px_as - pj_as;
+                let d2 = dl*dl + da*da + db*db + das*das;
+                let mask = d2.cmp_lt(min_d2);
+                min_d2 = mask.blend(d2, min_d2);
+                min_idx = mask.blend(idx_iter, min_idx);
+                idx_iter += four;
+                j += 4;
+            }
+            // Horizontal min over 4 lanes
+            let d2_arr: [f32; 4] = min_d2.to_array();
+            let idx_arr: [f32; 4] = min_idx.to_array();
+            let mut bj = 0usize; let mut bd2 = f32::INFINITY;
+            for lane in 0..4 {
+                if d2_arr[lane] < bd2 {
+                    bd2 = d2_arr[lane];
+                    bj = idx_arr[lane] as usize;
                 }
             }
-            idx[0] = best_j as u8;
+            idx[0] = bj as u8;
         });
     let palette_srgb: Vec<Rgb<u8>> = palette_oklab.iter().map(|c| oklab_to_srgb_u8(*c)).collect();
     (indices, palette_srgb)
