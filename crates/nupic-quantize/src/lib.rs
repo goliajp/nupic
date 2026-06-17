@@ -848,26 +848,34 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
         return 0.7; // tier-4c: gradient (banding-prone, needs strong dither)
     }
     if var > 50.0 {
-        // Phase 3.12 (Cycle 31): tier-4b/4e split by adjacent-pixel mean.
-        // Probing 5 tier-4b fixtures showed adj_mn cleanly separates:
+        // Phase 3.12 (Cycle 31 → Cycle 32): tier-4b/4e split by adj_mn.
+        // Cycle 31 used `mean > 5.0 → 0.5` based on 5-fixture probe, missing
+        // the baseline-7 + 11-photo-noisy tier-4 fixtures. Cycle 32 full-
+        // corpus peak-d sweep showed the relationship is NON-monotonic —
+        // peak-d shifts back to 0.7 at very high adj_mn:
         //
-        //   fixture          var    adj_mn   want d   note
-        //   19 iceberg        52    3.80     0.7      tier-4b correct
-        //   24 melk           63    4.41     0.7      tier-4b correct
-        //   26 angkor         58    3.71     0.7      tier-4b correct
-        //   25 sofia         209    6.86     0.5      ← Cycle 31 fix (tier-4e)
-        //   28 orca           68    6.78     0.5      ← Cycle 31 fix (tier-4e)
+        //   fixture          var    adj_mn   peak d   note
+        //   19 iceberg        52    3.80     0.7      tier-4b
+        //   26 angkor         58    3.71     0.7      tier-4b
+        //   24 melk           63    4.41     0.7      tier-4b
+        //   07 product        85    4.13     0.7      tier-4b
+        //   28 orca           68    6.78     0.5      tier-4e (band)
+        //   25 sofia         209    6.86     0.5      tier-4e (band)
+        //   05 mountain      320    9.44     0.7      Cycle 31 misroute
+        //   11 noisy         297   12.68     0.7      Cycle 31 misroute
+        //   06 landscape     663   21.68     0.7      Cycle 31 misroute
         //
-        // Coarse-texture inputs (adj_mn > 5) have high adjacent contrast →
-        // already-distinct palette → dither hurts more than helps. Fine-
-        // texture inputs (adj_mn ≤ 5) need dither to preserve smoothness.
+        // Narrow band adj_mn ∈ (5, 7.5] catches the 25/28 sweet spot
+        // without regressing 05/06/11 (peak 0.7). Cycle 31's open-band
+        // rule cost −1.97 SSIM on 05/06/11 for +0.40 on 25/28 (net
+        // −1.57); Cycle 32 narrow-band keeps the +0.40 and recovers all.
         //
         // 18 snowflake (adj_mn=2.66, want 0.25-0.5) still misroutes to 0.7
-        // but the gap is only 0.16 SSIM — within noise band. Deferred.
-        if mean > 5.0 {
-            return 0.5; // tier-4e (Cycle 31): coarse-texture photo
+        // but gap only 0.16 SSIM — within noise band. Deferred.
+        if mean > 5.0 && mean <= 7.5 {
+            return 0.5; // tier-4e: coarse-texture band (peak shifts to 0.5)
         }
-        return 0.7; // tier-4b: textured photo
+        return 0.7; // tier-4b: textured photo (peak 0.7 below/above the band)
     }
     // Phase 3.11 (Cycle 30): tier-4d high-uniq smooth photos. Cycle 27
     // shipped with threshold 50K based on N=3 evidence (13/17/20).
