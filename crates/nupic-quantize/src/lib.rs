@@ -135,6 +135,23 @@ pub fn quantize_indexed_png(
     };
     let (indices, palette_srgb, palette_alpha) =
         compact_palette(indices, palette_srgb, palette_alpha);
+    // Cycle 59: luma-sort palette. Marginal +0-1% size win on
+    // luma-gradient content (27 whale -0.85 %) via deflate LZ77
+    // locality — adjacent pixels with similar luma now have nearby
+    // palette indices. No effect on most fixtures, no regression
+    // observed. Free post-process.
+    let (indices, palette_srgb, palette_alpha) = {
+        let n = palette_srgb.len();
+        let lumas: Vec<i32> = palette_srgb.iter().map(|c| (c.r as i32 + c.g as i32 + c.b as i32) / 3).collect();
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by_key(|&i| lumas[i]);
+        let mut inv_map = vec![0u8; n];
+        for (new_i, &old_i) in order.iter().enumerate() { inv_map[old_i] = new_i as u8; }
+        let new_indices: Vec<u8> = indices.iter().map(|&i| inv_map[i as usize]).collect();
+        let new_palette: Vec<Rgb<u8>> = order.iter().map(|&old_i| palette_srgb[old_i]).collect();
+        let new_alpha: Vec<u8> = order.iter().map(|&old_i| palette_alpha[old_i]).collect();
+        (new_indices, new_palette, new_alpha)
+    };
     let trns_opt = if palette_alpha.iter().all(|&a| a == 255) {
         None
     } else {
