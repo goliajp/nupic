@@ -1209,6 +1209,7 @@ dependencies = [
  "crc32fast",
  "fast-srgb8",
  "flate2",
+ "gif",
  "image",
  "imagequant",
  "imgref",
