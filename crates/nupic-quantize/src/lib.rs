@@ -75,6 +75,133 @@ impl Default for QuantizeOpts {
     }
 }
 
+/// SoA palette padded to multiple of 4 for f32x4 lane consumption.
+/// Pad slots hold +1e9 so they never win argmin.
+struct IcmSoAPalette {
+    l: Vec<f32>,
+    a: Vec<f32>,
+    b: Vec<f32>,
+    k_pad: usize,
+}
+impl IcmSoAPalette {
+    fn from_oklab(pal: &[Oklab]) -> Self {
+        let k_real = pal.len();
+        let k_pad = (k_real + 3) & !3usize;
+        let mut l = Vec::with_capacity(k_pad);
+        let mut a = Vec::with_capacity(k_pad);
+        let mut b = Vec::with_capacity(k_pad);
+        for c in pal {
+            l.push(c.l);
+            a.push(c.a);
+            b.push(c.b);
+        }
+        for _ in k_real..k_pad {
+            l.push(1.0e9);
+            a.push(1.0e9);
+            b.push(1.0e9);
+        }
+        Self { l, a, b, k_pad }
+    }
+}
+
+/// Cycle 91c (R9 production wiring): SoA + `f32x4` ICM step.
+/// Bit-exact replacement for the Cycle 71 scalar inner loop — same
+/// data term (OKLab L²), same Potts smoothness (4-neighbor mismatch
+/// count × λ²), same argmin tiebreak (first-min by index). Validated
+/// in `docs/research/png/04ss-cycle89-icm-simd.md` (1.67× clean
+/// speedup, byte-identical PNG output on baseline-7).
+fn icm_step_simd(
+    src_oklab: &[Oklab],
+    w: usize,
+    h: usize,
+    pal: &IcmSoAPalette,
+    indices: &mut [u8],
+    lambda_sq: f32,
+) {
+    use wide::{f32x4, CmpLt, CmpNe};
+    let one_f4 = f32x4::splat(1.0);
+    let zero_f4 = f32x4::splat(0.0);
+    let four_f4 = f32x4::splat(4.0);
+    let lam_f4 = f32x4::splat(lambda_sq);
+    let inf_f4 = f32x4::splat(f32::INFINITY);
+
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            let px = src_oklab[i];
+            let n_up_u = if y > 0 { indices[i - w] } else { 255u8 };
+            let n_dn_u = if y + 1 < h { indices[i + w] } else { 255u8 };
+            let n_lf_u = if x > 0 { indices[i - 1] } else { 255u8 };
+            let n_rt_u = if x + 1 < w { indices[i + 1] } else { 255u8 };
+
+            let pl_f4 = f32x4::splat(px.l);
+            let pa_f4 = f32x4::splat(px.a);
+            let pb_f4 = f32x4::splat(px.b);
+
+            let mut min_d2 = inf_f4;
+            let mut min_idx = f32x4::from([0.0, 1.0, 2.0, 3.0]);
+            let mut idx_iter = f32x4::from([0.0, 1.0, 2.0, 3.0]);
+
+            let n_up_active = n_up_u != 255;
+            let n_dn_active = n_dn_u != 255;
+            let n_lf_active = n_lf_u != 255;
+            let n_rt_active = n_rt_u != 255;
+            let nup_v = if n_up_active { f32x4::splat(n_up_u as f32) } else { inf_f4 };
+            let ndn_v = if n_dn_active { f32x4::splat(n_dn_u as f32) } else { inf_f4 };
+            let nlf_v = if n_lf_active { f32x4::splat(n_lf_u as f32) } else { inf_f4 };
+            let nrt_v = if n_rt_active { f32x4::splat(n_rt_u as f32) } else { inf_f4 };
+
+            let mut j = 0usize;
+            while j < pal.k_pad {
+                let cl = f32x4::new([pal.l[j], pal.l[j+1], pal.l[j+2], pal.l[j+3]]);
+                let ca = f32x4::new([pal.a[j], pal.a[j+1], pal.a[j+2], pal.a[j+3]]);
+                let cb = f32x4::new([pal.b[j], pal.b[j+1], pal.b[j+2], pal.b[j+3]]);
+                let dl = pl_f4 - cl;
+                let da = pa_f4 - ca;
+                let db = pb_f4 - cb;
+                let data = dl * dl + da * da + db * db;
+
+                let mut smooth_count = zero_f4;
+                if n_up_active {
+                    let neq = idx_iter.cmp_ne(nup_v);
+                    smooth_count += neq.blend(one_f4, zero_f4);
+                }
+                if n_dn_active {
+                    let neq = idx_iter.cmp_ne(ndn_v);
+                    smooth_count += neq.blend(one_f4, zero_f4);
+                }
+                if n_lf_active {
+                    let neq = idx_iter.cmp_ne(nlf_v);
+                    smooth_count += neq.blend(one_f4, zero_f4);
+                }
+                if n_rt_active {
+                    let neq = idx_iter.cmp_ne(nrt_v);
+                    smooth_count += neq.blend(one_f4, zero_f4);
+                }
+                let cost = data + lam_f4 * smooth_count;
+
+                let mask = cost.cmp_lt(min_d2);
+                min_d2 = mask.blend(cost, min_d2);
+                min_idx = mask.blend(idx_iter, min_idx);
+
+                idx_iter += four_f4;
+                j += 4;
+            }
+            let arr_d = min_d2.to_array();
+            let arr_i = min_idx.to_array();
+            let mut best_d = arr_d[0];
+            let mut best_j = arr_i[0] as u8;
+            for k in 1..4 {
+                if arr_d[k] < best_d {
+                    best_d = arr_d[k];
+                    best_j = arr_i[k] as u8;
+                }
+            }
+            indices[i] = best_j;
+        }
+    }
+}
+
 /// One-shot pipeline: produce an indexed PNG byte stream from an RGBA8
 /// source via the Stone C algorithm.
 ///
@@ -188,37 +315,11 @@ pub fn quantize_indexed_png(
             let h = height as usize;
             let k = pal_ok.len();
             for &lambda_sq in &LAMBDAS {
-                // ICM step
-                for y in 0..h {
-                    for x in 0..w {
-                        let i = y * w + x;
-                        let px = src_oklab[i];
-                        let n_up = if y > 0 { idx[i - w] } else { 255 };
-                        let n_dn = if y + 1 < h { idx[i + w] } else { 255 };
-                        let n_lf = if x > 0 { idx[i - 1] } else { 255 };
-                        let n_rt = if x + 1 < w { idx[i + 1] } else { 255 };
-                        let mut best_j = idx[i];
-                        let mut best_cost = f32::INFINITY;
-                        for j in 0..k {
-                            let pj = pal_ok[j];
-                            let dl = px.l - pj.l;
-                            let da = px.a - pj.a;
-                            let db = px.b - pj.b;
-                            let data = dl*dl + da*da + db*db;
-                            let mut s = 0u32;
-                            if n_up != j as u8 && n_up != 255 { s += 1; }
-                            if n_dn != j as u8 && n_dn != 255 { s += 1; }
-                            if n_lf != j as u8 && n_lf != 255 { s += 1; }
-                            if n_rt != j as u8 && n_rt != 255 { s += 1; }
-                            let cost = data + lambda_sq * (s as f32);
-                            if cost < best_cost {
-                                best_cost = cost;
-                                best_j = j as u8;
-                            }
-                        }
-                        idx[i] = best_j;
-                    }
-                }
+                // Cycle 91c R9 SIMD (production wiring): bit-exact f32x4
+                // replacement for the Cycle 71 scalar ICM. 1.67× speedup
+                // on baseline-7 (see 04ss / 04uu). Algorithm unchanged.
+                let soa = IcmSoAPalette::from_oklab(&pal_ok);
+                icm_step_simd(&src_oklab, w, h, &soa, &mut idx, lambda_sq);
                 // Palette retrain: centroid = mean of assigned pixels
                 let mut sum_l = vec![0.0f64; k];
                 let mut sum_a = vec![0.0f64; k];
