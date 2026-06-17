@@ -830,13 +830,20 @@ pub fn train_palette_rgba(
     n_colors: usize,
 ) -> Result<(Vec<Oklab>, Vec<u8>), QuantizeError> {
     fn try_iq(src_rgba: &[u8], w: u32, h: u32, q_min: u8) -> Result<Vec<rgb::RGBA8>, ()> {
-        let pixels: Vec<rgb::RGBA8> = src_rgba.chunks_exact(4)
-            .map(|c| rgb::RGBA8 { r: c[0], g: c[1], b: c[2], a: c[3] })
-            .collect();
+        // Cycle 51: zero-copy slice cast. rgb::RGBA8 is repr(C) { r,g,b,a:u8 }
+        // matching src_rgba's byte layout exactly. Saves a 20 MB Vec<RGBA8>
+        // allocation on 5MP fixtures (~30% of imagequant RSS overhead).
+        assert!(src_rgba.len() % 4 == 0);
+        let pixels: &[rgb::RGBA8] = unsafe {
+            std::slice::from_raw_parts(
+                src_rgba.as_ptr() as *const rgb::RGBA8,
+                src_rgba.len() / 4,
+            )
+        };
         let mut attrs = imagequant::new();
         attrs.set_quality(q_min, 95).map_err(|_| ())?;
         attrs.set_speed(4).map_err(|_| ())?;
-        let mut img = attrs.new_image(pixels.as_slice(), w as usize, h as usize, 0.0).map_err(|_| ())?;
+        let mut img = attrs.new_image(pixels, w as usize, h as usize, 0.0).map_err(|_| ())?;
         let mut quant = attrs.quantize(&mut img).map_err(|_| ())?;
         // Cycle 36: skip the per-pixel remap. `remapped()` returns
         // (palette, indices), but we discard indices — `apply_palette_rgba`
