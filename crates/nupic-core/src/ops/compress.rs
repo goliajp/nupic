@@ -223,13 +223,21 @@ fn encode_png_stone_c(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     // size per fixture vs n=256. See `classify_for_palette_size`.
     let (n_colors, importance_alpha) =
         nupic_quantize::classify_for_palette_size_with_importance(&raw, w as usize);
+    // Cycle 105 P-03: sharp-mask logos (03 wiki class) bump oxipng preset
+    // from the adaptive default (3 on <2MP) to 6 to extract the second
+    // half of the Cycle 102 spike's savings (10135 B vs 12253 B at p=3).
+    // Trigger predicate `opq<0.95 ∧ adj_mn>5 ∧ uniq_opq<500` validated
+    // on the 30-fixture Cycle 105 cohort: triggers exactly on 03 wiki,
+    // does not false-trigger on any other fixture.
+    let p03_preset_boost = opts.effort == nupic_quantize::QuantizeOpts::default().oxipng_preset
+        && nupic_quantize::is_p03_sharp_mask_logo(&raw, w as usize);
     let qopts = nupic_quantize::QuantizeOpts {
         n_colors,
         // Cycle 21: pass full effort 0-10 through (was capped at 6).
         // quantize_indexed_png internally caps libdeflate preset at 6,
         // and treats effort ≥ 7 as opt-in Zopfli deflater (slower,
         // -0.3% corpus size, 0 SSIM regression).
-        oxipng_preset: opts.effort.min(10),
+        oxipng_preset: if p03_preset_boost { 6 } else { opts.effort.min(10) },
         strip_metadata: opts.strip_metadata,
         dither_strength: opts.dither_strength,
         // Cycle 43: importance-sampled Lloyd for stochastic content.

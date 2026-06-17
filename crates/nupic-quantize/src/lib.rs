@@ -1336,7 +1336,21 @@ pub fn classify_for_palette_size(src_rgba: &[u8], width: usize) -> usize {
         //   23 statue @ n=32+d=0.7 → 157 KB (-60 KB)
         let (adj_mn, _var) = compute_adj_lum_diff_stats(src_rgba, width);
         if adj_mn > 5.0 {
-            return 256;
+            // Cycle 105 P-03: split sharp-mask transparency by palette size.
+            // Logo content (03 wiki uniq_opq=129) wins at K=64 d=0 preset=6
+            // (-31% size vs K=256 preset=3, SSIM 77.7 vs TinyPNG floor
+            // -63.72). Soft-trans larger content (14 soft-trans uniq >> 500)
+            // stays at K=256. Uniq cap 500 cleanly separates them on the
+            // 30-fixture Cycle 105 validation cohort.
+            let step_u = if n_total > 1_000_000 { 4 } else { 1 };
+            let mut uniq = std::collections::HashSet::with_capacity(600);
+            for p in src_rgba.chunks_exact(4).step_by(step_u) {
+                if p[3] != 255 { continue; }
+                let key = (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16);
+                uniq.insert(key);
+                if uniq.len() >= 500 { return 256; }
+            }
+            return 64;
         }
         let step_u = if n_total > 1_000_000 { 4 } else { 1 };
         let mut uniq = std::collections::HashSet::with_capacity(5_500);
@@ -1426,6 +1440,36 @@ pub fn classify_for_palette_size_with_importance(
     } else {
         (n, 0.0)
     }
+}
+
+/// Cycle 105 P-03 trigger predicate. Returns `true` when the input is a
+/// sharp-mask transparency logo (opq<0.95 ∧ adj_mn>5 ∧ uniq_opq<500) —
+/// the exact same content class that `classify_for_palette_size` routes
+/// to K=64 on the same branch. Callers (notably `encode_png_stone_c`)
+/// use the signal to bump `oxipng_preset` from the adaptive default
+/// (3 on <2MP) to 6, extracting the second half of the Cycle 102 spike
+/// savings (10135 B vs 12253 B at preset=3 on 03 wiki).
+#[must_use]
+pub fn is_p03_sharp_mask_logo(src_rgba: &[u8], width: usize) -> bool {
+    let n_total = src_rgba.len() / 4;
+    if n_total == 0 { return false; }
+    let mut n_opaque = 0usize;
+    for px in src_rgba.chunks_exact(4) {
+        if px[3] == 255 { n_opaque += 1; }
+    }
+    let opq = n_opaque as f64 / n_total as f64;
+    if opq >= 0.95 { return false; }
+    let (adj_mn, _var) = compute_adj_lum_diff_stats(src_rgba, width);
+    if adj_mn <= 5.0 { return false; }
+    let step_u = if n_total > 1_000_000 { 4 } else { 1 };
+    let mut uniq = std::collections::HashSet::with_capacity(600);
+    for p in src_rgba.chunks_exact(4).step_by(step_u) {
+        if p[3] != 255 { continue; }
+        let key = (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16);
+        uniq.insert(key);
+        if uniq.len() >= 500 { return false; }
+    }
+    true
 }
 
 /// Compute mean and variance of adjacent-pixel luma absolute difference.
