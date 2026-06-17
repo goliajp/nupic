@@ -757,7 +757,27 @@ pub fn is_gradient_candidate(src_rgba: &[u8], width: u32) -> bool {
 }
 
 #[must_use]
-pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
+pub fn classify_for_auto_dither(_src_rgba: &[u8], _width: u32) -> f32 {
+    // Cycle 38: classifier flattened to d=0.0. Per user direction
+    // (2026-06-17): TinyPNG's SSIMULACRA2 is the industry-accepted
+    // quality threshold; chasing peak SSIM above it (Cycle 30-35,
+    // +0.16 to +17.23 per fixture) costs +5-13% size with little
+    // marketing value. Size and encode/decode perf matter more.
+    //
+    // 7-fixture marketing baseline at d=0.0:
+    //   nupic 2419 KB / 7 SSIM all > TinyPNG  (was 2662 KB / +5-17 SSIM)
+    //   = -8.5 % vs TinyPNG total size, still 7/7 SSIM wins
+    //
+    // The tier-1/2/3/4 routing tree from Cycle 30-35 is archived in
+    // essays 03u-03z + 04a-04b. Users wanting peak SSIM at higher
+    // size pass `--dither 0.5` (most photo class) or `--dither 0.7`
+    // (gradient / smooth-gradient transparency) explicitly.
+    0.0
+}
+
+#[doc(hidden)]
+#[allow(dead_code, clippy::too_many_lines)]
+fn classify_for_auto_dither_legacy(src_rgba: &[u8], width: u32) -> f32 {
     let mut n_opaque = 0usize;
     let mut n_zero_alpha = 0usize;
     let mut n_total = 0usize;
