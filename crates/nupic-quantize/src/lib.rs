@@ -1346,7 +1346,16 @@ pub fn classify_for_palette_size(src_rgba: &[u8], width: usize) -> usize {
             uniq.insert(key);
             if uniq.len() >= 5_000 { return 32; } // photo+edge
         }
-        return 64; // translucent overlay
+        // Cycle 104 P-01: tier-trans low-uniq translucent content.
+        // Cycle 102 spike + Cycle 103 30-fixture validation found:
+        //   chroma_entropy < 5 (2D OKLab a/b 16×16 histogram Shannon ent)
+        //   on this branch → K=96 d=0.2 beats K=64 d=0.7 by 9-22% size,
+        //   SSIM stays well above TinyPNG floor. Triggering cohort
+        //   (01 dice, 03 wiki when adj_mn-misclassed here, mi0): 3/3 wins.
+        if chroma_entropy_oklab(src_rgba) < 5.0 {
+            return 96;
+        }
+        return 64; // translucent overlay (entropy ≥ 5 fallback to Cycle 73)
     }
     // Cycle 40: smooth-gradient detection (cheap: one O(N/step) pass
     // computing adj_mn + var on a sub-sampled row grid).
@@ -1471,10 +1480,72 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
     if opq < 0.95 {
         let (adj_mn, _var) = compute_adj_lum_diff_stats(src_rgba, width as usize);
         if adj_mn <= 5.0 {
+            // Cycle 104 P-01: keep in lock-step with classify_for_palette_size n=96
+            // branch — fires only when (uniq_opq < 5000) AND (entropy < 5). Without
+            // the uniq gate, this would over-trigger on 02 pluto (uniq=19K) which
+            // is on the K=32 photo+edge path and needs d=0.7 dither (Cycle 73).
+            let n_total_lut = src_rgba.len() / 4;
+            let step_u = if n_total_lut > 1_000_000 { 4 } else { 1 };
+            let mut uniq = std::collections::HashSet::with_capacity(5_500);
+            let mut hit_cap = false;
+            for p in src_rgba.chunks_exact(4).step_by(step_u) {
+                if p[3] != 255 { continue; }
+                let key = (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16);
+                uniq.insert(key);
+                if uniq.len() >= 5_000 { hit_cap = true; break; }
+            }
+            if !hit_cap && chroma_entropy_oklab(src_rgba) < 5.0 {
+                return 0.2;
+            }
             return 0.7;
         }
     }
     0.0
+}
+
+/// Cycle 104 P-01 helper — Shannon entropy of (OKLab a, b) 2D histogram
+/// (16 × 16 bins, range auto-fitted to data).  Measures how broadly chroma
+/// is distributed; low entropy ⇒ narrow chroma palette ⇒ smaller indexed
+/// palette can carry the content.  Used by classify_for_palette_size and
+/// classify_for_auto_dither to route low-uniq translucent content
+/// (01 dice, mi0 corpus) to K=96 d=0.2 instead of K=64 d=0.7 — Cycle 102
+/// spike + Cycle 103 30-fixture validation, GREEN on baseline-7+5MP+
+/// corpus-500 sample.
+#[doc(hidden)]
+fn chroma_entropy_oklab(src_rgba: &[u8]) -> f32 {
+    let n = src_rgba.len() / 4;
+    if n == 0 { return 0.0; }
+    let step = if n > 1_000_000 { 4 } else { 1 };
+    let mut oklab_ab: Vec<(f32, f32)> = Vec::with_capacity(n / step + 1);
+    let mut a_min = f32::INFINITY; let mut a_max = f32::NEG_INFINITY;
+    let mut b_min = f32::INFINITY; let mut b_max = f32::NEG_INFINITY;
+    for p in src_rgba.chunks_exact(4).step_by(step) {
+        let o = srgb_u8_to_oklab(Rgb { r: p[0], g: p[1], b: p[2] });
+        if o.a < a_min { a_min = o.a; } if o.a > a_max { a_max = o.a; }
+        if o.b < b_min { b_min = o.b; } if o.b > b_max { b_max = o.b; }
+        oklab_ab.push((o.a, o.b));
+    }
+    let bins = 16usize;
+    let mut hist = vec![0u32; bins * bins];
+    let a_span = (a_max - a_min).max(1e-6);
+    let b_span = (b_max - b_min).max(1e-6);
+    for &(a, b) in &oklab_ab {
+        let ai = (((a - a_min) / a_span) * bins as f32)
+            .floor().clamp(0.0, bins as f32 - 1.0) as usize;
+        let bi = (((b - b_min) / b_span) * bins as f32)
+            .floor().clamp(0.0, bins as f32 - 1.0) as usize;
+        hist[ai * bins + bi] += 1;
+    }
+    let total = oklab_ab.len() as f64;
+    if total == 0.0 { return 0.0; }
+    let mut entropy = 0.0f64;
+    for &c in hist.iter() {
+        if c > 0 {
+            let p = c as f64 / total;
+            entropy -= p * p.log2();
+        }
+    }
+    entropy as f32
 }
 
 #[doc(hidden)]
