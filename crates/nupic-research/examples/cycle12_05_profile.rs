@@ -91,6 +91,7 @@ fn main() -> Result<()> {
             oxipng_preset: 5,
             strip_metadata: true,
             dither_strength: 0.7,
+            ..Default::default()
         };
         let _ = iters; // QuantizeOpts uses DEFAULT_REFINE_ITERS internally; skip iter variations here
         let png = quantize_indexed_png(&raw, w, h, opts).map_err(|e| anyhow::anyhow!("{e:?}"))?;

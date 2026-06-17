@@ -45,7 +45,8 @@ fn process(src_path: &Path, dither_strength: f32, tmpdir: &Path) -> Result<(usiz
         oxipng_preset: 5,
         strip_metadata: true,
         dither_strength,
-    };
+            ..Default::default()
+        };
     let png = quantize_indexed_png(&raw, w, h, opts).map_err(|e| anyhow::anyhow!("{e:?}"))?;
     let fname = src_path.file_name().unwrap().to_string_lossy();
     let out_path = tmpdir.join(format!("d{:.2}-{fname}", dither_strength));

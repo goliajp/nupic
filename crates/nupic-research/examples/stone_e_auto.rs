@@ -75,7 +75,8 @@ fn run(src_path: &Path, strength: f32, label: &str, tmpdir: &Path) -> Result<(us
         oxipng_preset: 5,
         strip_metadata: true,
         dither_strength: strength,
-    };
+            ..Default::default()
+        };
     let png = quantize_indexed_png(&raw, w, h, opts).map_err(|e| anyhow::anyhow!("{e:?}"))?;
     let out = tmpdir.join(format!("{label}-{}", src_path.file_name().unwrap().to_string_lossy()));
     std::fs::write(&out, &png)?;
