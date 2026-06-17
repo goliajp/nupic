@@ -848,6 +848,17 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
         return 0.7; // tier-4c: gradient (banding-prone, needs strong dither)
     }
     if var > 50.0 {
+        // Phase 3.13 (Cycle 33): tier-4f chunky-run escape. When a high-
+        // variance fixture also has mean_run > 2 (long same-color runs),
+        // it's photographically tier-3-like (chunky patches) despite the
+        // tier-4 uniq escape. 18-snowflake (var=123, mr=2.57, uniq=114K,
+        // mean=2.66) peaks at d=0.25 (82.81) vs current d=0.7 (82.65) —
+        // +0.16 SSIM and −115 KB. All 11 other tier-4b/4e fixtures have
+        // mr < 1.6, so this branch fires uniquely on 18. N=1 evidence;
+        // documented in essay 03z.
+        if mean_run > 2.0 {
+            return 0.25; // tier-4f (Cycle 33): chunky-run tier-3-like texture
+        }
         // Phase 3.12 (Cycle 31 → Cycle 32): tier-4b/4e split by adj_mn.
         // Cycle 31 used `mean > 5.0 → 0.5` based on 5-fixture probe, missing
         // the baseline-7 + 11-photo-noisy tier-4 fixtures. Cycle 32 full-
