@@ -800,7 +800,22 @@ pub fn classify_for_palette_size(src_rgba: &[u8], width: usize) -> usize {
     if adj_mn < 1.5 && var < 20.0 && uniq_count > 75_000 {
         return 256; // tier-4d-rich: smooth-gradient photo with many colors
     }
-    if uniq_count > 100_000 { 192 } else { 208 }
+    if uniq_count > 100_000 {
+        // Cycle 41: split high-uniq by variance. var > 200 ⇒ truly
+        // stochastic content (e.g. 05 mountain var=320) where palette
+        // quantization noise is hidden by image noise — keep n=192.
+        // var ≤ 200 ⇒ high-detail photo (NASA / high-res landscape /
+        // bird macro) where palette gradient matters — bump to 208.
+        //
+        // 500-corpus bench discovered 90 high-uniq fixtures with
+        // median SSIM 71, p10 61.8 (worst-routed branch). Many were
+        // NASA / Wikimedia photos: adj_mn 3-6, var 35-180. Bumping to
+        // n=208 recovers +3-5 SSIM at +1.6% size on outliers; baseline-7
+        // 05 mountain (var=320 > 200) keeps n=192.
+        if var > 200.0 { 192 } else { 208 }
+    } else {
+        208
+    }
 }
 
 /// Compute mean and variance of adjacent-pixel luma absolute difference.
