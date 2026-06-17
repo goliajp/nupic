@@ -167,3 +167,18 @@ result with concrete deployment.
 - `crates/nupic-research/examples/cycle96_r4_rd_grid.rs` — full driver. 189 encodes +
   189 SSIM subprocess calls in 85 s.
 - Previous: 04tt-04zz (Cycle 90-95 R1 thread).
+
+## Cycle 97 next-up (autorun entry)
+
+Spike a 3-class hand router on (chroma_entropy, edge_density, smoothness):
+- **UI / logo class:** chroma_entropy < 3.0 AND edge_density > 0.2 → route K=128 d=0
+- **Chroma-rich class:** trans_frac > 0 OR (chroma > 0.04 AND smoothness < 0.05) →
+  route K=256 d=0.5
+- **Stochastic noise class** (default): all others → K=256 d=0 (production current)
+
+Validate against the 7 baseline-7 fixtures (use Cycle 96 grid as oracle). Extend to
+5MP cohort (17 aurora, 25 sofia, 27 whale) with a smaller grid (K × dither, fix
+preset to 5MP-tier 0 or 1) — ~50 encodes, 1-2 min wall.
+
+Decision gate: route-picked config achieves ≥80% of full-grid Pareto-optimal iso-SSIM
+size win on ≥6/10 fixtures → GREEN, candidate for `Quality::Auto-R4` ship.
