@@ -308,6 +308,51 @@ pub fn refine_palette_kmeans(
     palette_alpha: &[u8],
     n_iters: usize,
 ) -> (Vec<Oklab>, Vec<u8>) {
+    // Cycle 37: sub-sample at stride=8 by default. Sweep on 7-fixture
+    // corpus showed stride=8 is net SSIM-positive (+0.24 avg) AND
+    // -84 % refine time (~10s → ~1.5s on 5MP). Full-pixel Lloyd was
+    // over-fitting to noise; subsample acts as regulariser.
+    let (pal, alpha, _iters_run) = refine_palette_kmeans_instrumented_strided(
+        src_rgba, width, height, palette_oklab, palette_alpha, n_iters, 0.0005, 8,
+    );
+    (pal, alpha)
+}
+
+/// As [`refine_palette_kmeans`] but with explicit EPS (early-exit
+/// threshold on max-centroid-move 4D L2 in OKLab+alpha space) and
+/// returns the actual iter count run (≤ `n_iters`). Used by the
+/// Cycle 37 perf sweep to characterise convergence vs SSIM tradeoff.
+#[must_use]
+pub fn refine_palette_kmeans_instrumented(
+    src_rgba: &[u8],
+    width: u32,
+    height: u32,
+    palette_oklab: &[Oklab],
+    palette_alpha: &[u8],
+    n_iters: usize,
+    eps: f32,
+) -> (Vec<Oklab>, Vec<u8>, usize) {
+    refine_palette_kmeans_instrumented_strided(
+        src_rgba, width, height, palette_oklab, palette_alpha, n_iters, eps, 1,
+    )
+}
+
+/// As [`refine_palette_kmeans_instrumented`] but with explicit pixel
+/// stride. `stride = 1` = full pixels (no subsample); `stride = 4` =
+/// every 4th pixel. Subsample reduces per-iter work by `stride×` at
+/// the cost of noisier centroid updates. Used by Cycle 37 perf sweep.
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn refine_palette_kmeans_instrumented_strided(
+    src_rgba: &[u8],
+    width: u32,
+    height: u32,
+    palette_oklab: &[Oklab],
+    palette_alpha: &[u8],
+    n_iters: usize,
+    eps: f32,
+    stride: usize,
+) -> (Vec<Oklab>, Vec<u8>, usize) {
     use rayon::iter::ParallelIterator;
     use rayon::slice::ParallelSlice;
 
@@ -316,7 +361,11 @@ pub fn refine_palette_kmeans(
     let k = palette_oklab.len();
     const ALPHA_WEIGHT: f32 = 2.0;
     const ALPHA_SCALE: f32 = ALPHA_WEIGHT / 255.0;
-    const EPS_SQ: f32 = 0.0005 * 0.0005;
+    let eps_sq: f32 = eps * eps;
+    // Backwards-compat alias for the remainder of the function body.
+    #[allow(non_snake_case)]
+    let EPS_SQ: f32 = eps_sq;
+    let stride = stride.max(1);
 
     let mut palette = palette_oklab.to_vec();
     let mut alpha = palette_alpha.to_vec();
@@ -328,13 +377,29 @@ pub fn refine_palette_kmeans(
     // dominated Lloyd's runtime (2.27 s out of 2.75 s total encode).
     // Memory cost: 16 bytes per pixel (4 × f32 = L, a, b, alpha-scaled)
     // = ~ 15 MB for a 1200 × 800 image; acceptable for the runtime win.
-    let pixels_oklab_alpha: Vec<(f32, f32, f32, u8)> = src_rgba
-        .par_chunks_exact(4)
-        .map(|px| {
-            let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
-            (p.l, p.a, p.b, px[3])
-        })
-        .collect();
+    let pixels_oklab_alpha: Vec<(f32, f32, f32, u8)> = if stride == 1 {
+        src_rgba
+            .par_chunks_exact(4)
+            .map(|px| {
+                let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
+                (p.l, p.a, p.b, px[3])
+            })
+            .collect()
+    } else {
+        // Cycle 37: sub-sample at given stride for sub-linear Lloyd cost.
+        {
+            use rayon::iter::IndexedParallelIterator;
+            src_rgba
+                .par_chunks_exact(4)
+                .enumerate()
+                .filter_map(|(i, px)| {
+                    if i % stride != 0 { return None; }
+                    let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
+                    Some((p.l, p.a, p.b, px[3]))
+                })
+                .collect()
+        }
+    };
 
     // Pre-allocate assigned buffer; reused each iter.
     let mut assigned: Vec<u8> = vec![0u8; pixels_oklab_alpha.len()];
@@ -345,7 +410,9 @@ pub fn refine_palette_kmeans(
     // after 1-2 iters. Limit force-iter to first SPLIT_FORCE_ITERS;
     // after that, EPS_SQ governs convergence regardless of split.
     const SPLIT_FORCE_ITERS: usize = 30;
+    let mut iters_run = 0usize;
     for iter_idx in 0..n_iters {
+        iters_run = iter_idx + 1;
         use rayon::iter::IndexedParallelIterator;
         use rayon::slice::ParallelSliceMut;
         // Parallel per-pixel assign over precomputed OKLab pixels.
@@ -507,7 +574,7 @@ pub fn refine_palette_kmeans(
             break;
         }
     }
-    (palette, alpha)
+    (palette, alpha, iters_run)
 }
 
 /// Train palette: imagequant median-cut → convert to OKLab. The
