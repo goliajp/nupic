@@ -48,6 +48,19 @@ pub struct QuantizeOpts {
     /// transparent photos see no benefit or slight regression. See
     /// `docs/research/png/03e-stone-e-fs-dither.md`.
     pub dither_strength: f32,
+    /// Cycle 43 importance-sampled Lloyd weight α. 0.0 = standard Lloyd
+    /// (uniform pixel weights, default). > 0 = perceptual-loss-aware
+    /// weighted Lloyd: per-pixel weight `1 / (1 + α · |luma diff|)`,
+    /// downweighting texture/edge pixels so palette centroids gravitate
+    /// to smooth-gradient regions (where SSIMULACRA2 banding penalties
+    /// dominate).
+    ///
+    /// Pareto bench on 05 mountain (stochastic photo, var=320):
+    /// - α=0, n=192: 341 KB / SSIM 65.33
+    /// - α=0.5, n=144: 324 KB / SSIM 60.04 — **-17 KB at iso-gate**.
+    ///
+    /// See `docs/research/png/04i-cycle43-importance-sampled-lloyd.md`.
+    pub importance_alpha: f32,
 }
 
 impl Default for QuantizeOpts {
@@ -57,6 +70,7 @@ impl Default for QuantizeOpts {
             oxipng_preset: 5,
             strip_metadata: true,
             dither_strength: 0.0,
+            importance_alpha: 0.0,
         }
     }
 }
@@ -79,14 +93,20 @@ pub fn quantize_indexed_png(
     let (mut palette_oklab, mut palette_alpha) =
         train_palette_rgba(src_rgba, width, height, opts.n_colors)?;
     // Stone D: palette refinement via Lloyd's k-means.
-    (palette_oklab, palette_alpha) = refine_palette_kmeans(
-        src_rgba,
-        width,
-        height,
-        &palette_oklab,
-        &palette_alpha,
-        DEFAULT_REFINE_ITERS,
-    );
+    // Cycle 43: use importance-sampled Lloyd when α > 0.
+    (palette_oklab, palette_alpha) = if opts.importance_alpha > 0.0 {
+        refine_palette_kmeans_importance(
+            src_rgba, width, height,
+            &palette_oklab, &palette_alpha,
+            DEFAULT_REFINE_ITERS, opts.importance_alpha,
+        )
+    } else {
+        refine_palette_kmeans(
+            src_rgba, width, height,
+            &palette_oklab, &palette_alpha,
+            DEFAULT_REFINE_ITERS,
+        )
+    };
     // Resolve dither strength: NaN means "auto-classify"; finite > 0
     // means explicit; else no dither.
     let resolved_strength = if opts.dither_strength.is_nan() {
@@ -316,6 +336,142 @@ pub fn refine_palette_kmeans(
         src_rgba, width, height, palette_oklab, palette_alpha, n_iters, 0.0005, 8,
     );
     (pal, alpha)
+}
+
+/// Cycle 43 — Importance-Sampled Lloyd k-means.
+///
+/// Per-pixel weight `w_i = 1 / (1 + α · |luma(p_i) − luma(neighbor_i)|)`.
+/// Smooth-gradient pixels (small luma diff) get higher weight; the
+/// weighted centroid update biases palette entries toward smooth
+/// regions where SSIMULACRA2 penalises palette banding most heavily.
+///
+/// Centroid update changes from arithmetic mean to weighted mean:
+///   `c_j = Σ_{i: cluster=j} w_i · pixel_i / Σ_{i: cluster=j} w_i`.
+///
+/// Pixel-to-centroid assignment is unchanged (standard L2 in OKLab+α).
+///
+/// Pareto bench: on 05-mountain (var=320 stochastic photo), α=0.5
+/// enables palette reduction from n=192 → n=144 while remaining above
+/// the SSIM gate (60.04 vs 59.41 TinyPNG) — net -17 KB at iso-gate.
+/// See `docs/research/png/04i-cycle43-importance-sampled-lloyd.md`.
+#[must_use]
+pub fn refine_palette_kmeans_importance(
+    src_rgba: &[u8],
+    width: u32,
+    height: u32,
+    palette_oklab: &[Oklab],
+    palette_alpha: &[u8],
+    n_iters: usize,
+    importance_alpha: f32,
+) -> (Vec<Oklab>, Vec<u8>) {
+    use rayon::iter::{ParallelIterator, IndexedParallelIterator};
+    use rayon::slice::{ParallelSlice, ParallelSliceMut};
+
+    let n_pixels = (width as usize) * (height as usize);
+    assert_eq!(src_rgba.len(), n_pixels * 4);
+    let k = palette_oklab.len();
+    const ALPHA_WEIGHT_C: f32 = 2.0;
+    const ALPHA_SCALE_C: f32 = ALPHA_WEIGHT_C / 255.0;
+    const EPS_SQ: f32 = 0.0005 * 0.0005;
+    const STRIDE: usize = 8;
+
+    // Precompute weights for every pixel from row-wise + col-wise
+    // luma diff (gradient estimate).
+    let w_usize = width as usize;
+    let h_usize = height as usize;
+    let mut weights = vec![1.0f32; n_pixels];
+    if importance_alpha > 0.0 {
+        for y in 0..h_usize {
+            for x in 0..w_usize {
+                let i = y * w_usize + x;
+                let l0 = (src_rgba[i*4] as i32 + src_rgba[i*4+1] as i32 + src_rgba[i*4+2] as i32) / 3;
+                let mut grad = 0i32; let mut cnt = 0;
+                if x + 1 < w_usize {
+                    let j = i + 1;
+                    let l1 = (src_rgba[j*4] as i32 + src_rgba[j*4+1] as i32 + src_rgba[j*4+2] as i32) / 3;
+                    grad += (l0 - l1).abs(); cnt += 1;
+                }
+                if y + 1 < h_usize {
+                    let j = (y + 1) * w_usize + x;
+                    let l1 = (src_rgba[j*4] as i32 + src_rgba[j*4+1] as i32 + src_rgba[j*4+2] as i32) / 3;
+                    grad += (l0 - l1).abs(); cnt += 1;
+                }
+                let mg = if cnt > 0 { grad as f32 / cnt as f32 } else { 0.0 };
+                weights[i] = 1.0 / (1.0 + importance_alpha * mg);
+            }
+        }
+    }
+
+    // Pre-build strided pixel vector + weight vector
+    let pixels: Vec<(f32, f32, f32, u8, f32)> = src_rgba
+        .par_chunks_exact(4)
+        .enumerate()
+        .filter_map(|(i, px)| {
+            if i % STRIDE != 0 { return None; }
+            let p = srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] });
+            Some((p.l, p.a, p.b, px[3], weights[i]))
+        })
+        .collect();
+
+    let mut palette = palette_oklab.to_vec();
+    let mut alpha = palette_alpha.to_vec();
+    let mut assigned = vec![0u8; pixels.len()];
+    for _ in 0..n_iters {
+        const CHUNK: usize = 8192;
+        let pal_ref: &[Oklab] = &palette;
+        let alpha_ref: &[u8] = &alpha;
+        pixels.par_chunks(CHUNK).zip(assigned.par_chunks_mut(CHUNK))
+            .for_each(|(chunk, out)| {
+                for (pi, &(pl, pa_l, pb, pa_alpha, _w)) in chunk.iter().enumerate() {
+                    let mut best_j = 0; let mut best_d2 = f32::INFINITY;
+                    for j in 0..k {
+                        let pj = pal_ref[j];
+                        let dl = pl - pj.l;
+                        let da = pa_l - pj.a;
+                        let db = pb - pj.b;
+                        let d_alpha = (pa_alpha as i32 - alpha_ref[j] as i32) as f32 * ALPHA_SCALE_C;
+                        let d2 = dl.mul_add(dl, da.mul_add(da, db.mul_add(db, d_alpha * d_alpha)));
+                        if d2 < best_d2 { best_d2 = d2; best_j = j; }
+                    }
+                    out[pi] = best_j as u8;
+                }
+            });
+        // Weighted centroid update
+        let mut sum_l = vec![0.0f64; k];
+        let mut sum_a = vec![0.0f64; k];
+        let mut sum_b = vec![0.0f64; k];
+        let mut sum_alpha = vec![0.0f64; k];
+        let mut sum_w = vec![0.0f64; k];
+        for (pi, &(pl, pa_l, pb, pa_alpha, w)) in pixels.iter().enumerate() {
+            let j = assigned[pi] as usize;
+            let wf = w as f64;
+            sum_l[j] += wf * pl as f64;
+            sum_a[j] += wf * pa_l as f64;
+            sum_b[j] += wf * pb as f64;
+            sum_alpha[j] += wf * pa_alpha as f64;
+            sum_w[j] += wf;
+        }
+        let mut max_move = 0.0f32;
+        for j in 0..k {
+            if sum_w[j] < 1e-9 { continue; }
+            let inv = 1.0 / sum_w[j];
+            let new_l = (sum_l[j] * inv) as f32;
+            let new_a = (sum_a[j] * inv) as f32;
+            let new_b = (sum_b[j] * inv) as f32;
+            let new_alpha = (sum_alpha[j] * inv).round() as u8;
+            let old = palette[j];
+            let dl = new_l - old.l;
+            let da = new_a - old.a;
+            let db = new_b - old.b;
+            let d_alpha = (new_alpha as i32 - alpha[j] as i32) as f32 * ALPHA_SCALE_C;
+            let m = dl*dl + da*da + db*db + d_alpha*d_alpha;
+            if m > max_move { max_move = m; }
+            palette[j] = Oklab { l: new_l, a: new_a, b: new_b };
+            alpha[j] = new_alpha;
+        }
+        if max_move < EPS_SQ { break; }
+    }
+    (palette, alpha)
 }
 
 /// As [`refine_palette_kmeans`] but with explicit EPS (early-exit
@@ -842,6 +998,30 @@ pub fn classify_for_palette_size(src_rgba: &[u8], width: usize) -> usize {
         if var > 200.0 { 192 } else { 208 }
     } else {
         208
+    }
+}
+
+/// Cycle 43 — extended classifier returning both palette size AND
+/// importance-sampled Lloyd α. For stochastic content (var > 200)
+/// returns reduced palette (n=144) + α=0.5, enabling Pareto win:
+/// 05 mountain saves -17 KB at iso-SSIM-gate. All other routes
+/// match `classify_for_palette_size` with α=0 (standard Lloyd).
+#[must_use]
+pub fn classify_for_palette_size_with_importance(
+    src_rgba: &[u8],
+    width: usize,
+) -> (usize, f32) {
+    let n = classify_for_palette_size(src_rgba, width);
+    // Re-derive var so we don't repeat the full scan — but compute_adj_lum_diff_stats
+    // is cheap so call again rather than threading state.
+    let (_adj_mn, var) = compute_adj_lum_diff_stats(src_rgba, width);
+    if n == 192 && var > 200.0 {
+        // Stochastic high-uniq photo: importance-sampled Lloyd at
+        // α=0.5 enables palette drop n=192 → n=144 (-17 KB on
+        // 05 mountain) while staying ≥ SSIM gate.
+        (144, 0.5)
+    } else {
+        (n, 0.0)
     }
 }
 
