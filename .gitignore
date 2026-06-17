@@ -2,8 +2,9 @@
 .DS_Store
 .claude/
 
-# PNG-bench large research datasets (regenerable via TinyPNG API)
+# PNG-bench large research datasets (regenerable via TinyPNG API + scripts/png-bench/)
 /assets/png-bench/corpus-500/
 /assets/png-bench/tinypng-corpus-500/
+/assets/png-bench/nupic-corpus-500/
 /assets/png-bench/current-nupic-0.4/
 /assets/png-bench/current-nupic-0.5/
