@@ -1,3 +1,11 @@
+> **⚠️ RETRACTION (Cycle 102, 2026-06-18)**
+>
+> This essay measured spike configs against a forced `K=256 d=0 preset=3` baseline,
+> which does NOT match production `Quality::Auto` (which picks K via classifier).
+> The GREEN/YELLOW/RED verdicts are internally consistent but **production-irrelevant**.
+> See [[04ggg-cycle102]] for the methodology reset and locked three-axis gate
+> (size ≤ 0.80× tiny AND SSIM ≥ tiny AND perf max).
+
 # 04eee · Cycle 100 — R4 widened router RED (closes simple-feature routing thread)
 
 **Status:** **RED**. Four widened router variants (C1 UI-widen, C2 +edge gate,

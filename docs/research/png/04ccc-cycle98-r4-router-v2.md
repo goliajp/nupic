@@ -1,3 +1,11 @@
+> **⚠️ RETRACTION (Cycle 102, 2026-06-18)**
+>
+> This essay measured spike configs against a forced `K=256 d=0 preset=3` baseline,
+> which does NOT match production `Quality::Auto` (which picks K via classifier).
+> The GREEN/YELLOW/RED verdicts are internally consistent but **production-irrelevant**.
+> See [[04ggg-cycle102]] for the methodology reset and locked three-axis gate
+> (size ≤ 0.80× tiny AND SSIM ≥ tiny AND perf max).
+
 # 04ccc · Cycle 98 — R4 router v2 GREEN (B1: 8/10, mean wc 90%)
 
 **Status:** **GREEN**. The minimal-change variant of Cycle 97's 3-class
