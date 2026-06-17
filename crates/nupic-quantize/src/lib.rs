@@ -757,26 +757,25 @@ pub fn is_gradient_candidate(src_rgba: &[u8], width: u32) -> bool {
 }
 
 #[must_use]
-/// Cycle 39: pick `n_colors` (palette size) for size-priority routing.
+/// Cycle 39 + 40: pick `n_colors` for size-priority routing.
 /// Returns the smallest palette that keeps SSIMULACRA2 ≥ TinyPNG's
-/// reference SSIM on the 7-baseline corpus.
+/// reference SSIM on the marketing baseline, with an outlier branch
+/// for smooth-gradient-rich content discovered in the 500-corpus
+/// (Cycle 40).
 ///
-/// Rule:
-/// - `opq < 0.95` (any transparency) → 64
-///   01 / 02 / 14 / 21-23 all hit gate with huge buffer at n=64.
-/// - `uniq > 100_000` (high-uniq stochastic photo) → 192
-///   05 mountain / 17 aurora / 20 rainbow / 13 very-large
-///   palette artefacts hidden by content noise.
-/// - otherwise → 208
-///   04 portrait / 06 landscape / 07 product etc — smooth photos
-///   where the palette gradient quality is gate-critical. n=208 is
-///   the smallest where 04/06 stay above TinyPNG SSIM with buffer.
-///
-/// Bench (7-fixture baseline, 2026-06-17):
-///   nupic 2217 KB / TinyPNG 2643 KB = **-16.1 %**.
-///   All 7 fixtures retain SSIMULACRA2 ≥ TinyPNG.
+/// Rule (in order):
+/// - `opq < 0.95` → 64 (transparency tier; huge SSIM buffer)
+/// - `adj_mn < 1.5` + `var < 20` + opaque-region-uniq > 75 K → 256
+///   (Cycle 40: smooth-gradient-rich photo. Identified via corpus-500
+///   outliers: p244/p154/p184/p220/p123 all sit in adj_mn∈[1.07,1.29],
+///   var∈[4.2,18.1], uniq∈[75K,136K] and crash to SSIM ~52-58 at
+///   default n=192/208. Forcing n=256 recovers +6-12 SSIM at only
+///   +0.5-2.5 % size on those fixtures. Baseline-7 unchanged
+///   (04 adj_mn=3.81, 06 adj_mn=21.68 — all above the 1.5 cutoff.)
+/// - opaque uniq > 100 K → 192 (high-uniq stochastic photo)
+/// - else → 208 (smooth photo, gate-critical)
 #[must_use]
-pub fn classify_for_palette_size(src_rgba: &[u8]) -> usize {
+pub fn classify_for_palette_size(src_rgba: &[u8], width: usize) -> usize {
     let n_total = src_rgba.len() / 4;
     let mut n_opaque = 0usize;
     for px in src_rgba.chunks_exact(4) {
@@ -786,6 +785,9 @@ pub fn classify_for_palette_size(src_rgba: &[u8]) -> usize {
     if opq < 0.95 {
         return 64;
     }
+    // Cycle 40: smooth-gradient detection (cheap: one O(N/step) pass
+    // computing adj_mn + var on a sub-sampled row grid).
+    let (adj_mn, var) = compute_adj_lum_diff_stats(src_rgba, width);
     let step_u = if n_total > 1_000_000 { 4 } else { 1 };
     let mut uniq = std::collections::HashSet::with_capacity(100_500);
     for p in src_rgba.chunks_exact(4).step_by(step_u) {
@@ -794,7 +796,42 @@ pub fn classify_for_palette_size(src_rgba: &[u8]) -> usize {
         uniq.insert(key);
         if uniq.len() > 100_000 { break; }
     }
-    if uniq.len() > 100_000 { 192 } else { 208 }
+    let uniq_count = uniq.len();
+    if adj_mn < 1.5 && var < 20.0 && uniq_count > 75_000 {
+        return 256; // tier-4d-rich: smooth-gradient photo with many colors
+    }
+    if uniq_count > 100_000 { 192 } else { 208 }
+}
+
+/// Compute mean and variance of adjacent-pixel luma absolute difference.
+/// Sub-samples rows proportionally to target ~500 K samples.
+/// Returns (mean, variance). Same algorithm as Cycle 17's classifier.
+fn compute_adj_lum_diff_stats(src_rgba: &[u8], width: usize) -> (f64, f64) {
+    let n_total = src_rgba.len() / 4;
+    let w = width.max(2);
+    let h = n_total / w;
+    let target = 500_000;
+    let target_rows = target / (w - 1).max(1);
+    let step = (h / target_rows.max(1)).max(1);
+    let mut sum_diff: u64 = 0;
+    let mut sum_sq: u64 = 0;
+    let mut count: u64 = 0;
+    for y in (0..h).step_by(step) {
+        for x in 0..w.saturating_sub(1) {
+            let i = (y * w + x) * 4;
+            if i + 7 >= src_rgba.len() { break; }
+            let l0 = (src_rgba[i] as u32 + src_rgba[i+1] as u32 + src_rgba[i+2] as u32) / 3;
+            let l1 = (src_rgba[i+4] as u32 + src_rgba[i+5] as u32 + src_rgba[i+6] as u32) / 3;
+            let d = (l0 as i32 - l1 as i32).unsigned_abs() as u64;
+            sum_diff += d;
+            sum_sq += d * d;
+            count += 1;
+        }
+    }
+    if count == 0 { return (0.0, 0.0); }
+    let mean = sum_diff as f64 / count as f64;
+    let var = (sum_sq as f64 / count as f64) - mean * mean;
+    (mean, var)
 }
 
 pub fn classify_for_auto_dither(_src_rgba: &[u8], _width: u32) -> f32 {
