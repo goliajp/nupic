@@ -848,6 +848,25 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
         return 0.7; // tier-4c: gradient (banding-prone, needs strong dither)
     }
     if var > 50.0 {
+        // Phase 3.12 (Cycle 31): tier-4b/4e split by adjacent-pixel mean.
+        // Probing 5 tier-4b fixtures showed adj_mn cleanly separates:
+        //
+        //   fixture          var    adj_mn   want d   note
+        //   19 iceberg        52    3.80     0.7      tier-4b correct
+        //   24 melk           63    4.41     0.7      tier-4b correct
+        //   26 angkor         58    3.71     0.7      tier-4b correct
+        //   25 sofia         209    6.86     0.5      ← Cycle 31 fix (tier-4e)
+        //   28 orca           68    6.78     0.5      ← Cycle 31 fix (tier-4e)
+        //
+        // Coarse-texture inputs (adj_mn > 5) have high adjacent contrast →
+        // already-distinct palette → dither hurts more than helps. Fine-
+        // texture inputs (adj_mn ≤ 5) need dither to preserve smoothness.
+        //
+        // 18 snowflake (adj_mn=2.66, want 0.25-0.5) still misroutes to 0.7
+        // but the gap is only 0.16 SSIM — within noise band. Deferred.
+        if mean > 5.0 {
+            return 0.5; // tier-4e (Cycle 31): coarse-texture photo
+        }
         return 0.7; // tier-4b: textured photo
     }
     // Phase 3.11 (Cycle 30): tier-4d high-uniq smooth photos. Cycle 27
