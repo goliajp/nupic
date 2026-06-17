@@ -721,8 +721,15 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
         let n_partial = n_total - n_opaque - n_zero_alpha;
         let a_partial_ratio = n_partial as f64 / n_total as f64;
         if a_partial_ratio >= 0.10 {
-            // Smooth-gradient transparency: dither doesn't help.
-            return if opaque_ratio < 0.50 { 0.0 } else { 0.35 };
+            // Cycle 35: smooth-gradient transparency benefits from dither.
+            // Peak-d sweep on 01-trans-demo and 14-soft-trans (both tier-1
+            // smooth, opq < 0.5 + a_partial ≥ 0.1):
+            //   01 trans-demo  d=0.0 SSIM -46.43  d=0.7 SSIM -32.75  +13.68
+            //   14 soft-trans  d=0.0 SSIM  66.90  d=0.7 SSIM  70.44   +3.55
+            // Both peak at d=0.7 (then crash at 1.0). Size cost ~40 % but
+            // metric gain is decisive. tier-2 smooth (opq ∈ [0.5, 0.95))
+            // branch unchanged at 0.35 — no corpus evidence to retune.
+            return if opaque_ratio < 0.50 { 0.7 } else { 0.35 };
         }
         // Sharp-mask: route by opaque-region uniq color count.
         let step_u = if n_total > 1_000_000 { 4 } else { 1 };
