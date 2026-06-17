@@ -545,9 +545,12 @@ pub fn train_palette_rgba(
         attrs.set_speed(4).map_err(|_| ())?;
         let mut img = attrs.new_image(pixels.as_slice(), w as usize, h as usize, 0.0).map_err(|_| ())?;
         let mut quant = attrs.quantize(&mut img).map_err(|_| ())?;
-        let _ = quant.set_dithering_level(0.0);
-        let (palette, _idx) = quant.remapped(&mut img).map_err(|_| ())?;
-        Ok(palette)
+        // Cycle 36: skip the per-pixel remap. `remapped()` returns
+        // (palette, indices), but we discard indices — `apply_palette_rgba`
+        // re-does the per-pixel assignment in OKLab space (Stone C
+        // insight). The remap step is O(N · K) and dominates 5MP
+        // encoding time. `palette()` returns just the palette in O(K).
+        Ok(quant.palette().to_vec())
     }
     let n = n_colors.min(256);
     let palette_rgba = try_iq(src_rgba, width, height, 70)
