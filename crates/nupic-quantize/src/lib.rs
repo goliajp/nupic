@@ -1213,30 +1213,33 @@ pub fn classify_for_palette_size(src_rgba: &[u8], width: usize) -> usize {
     if adj_mn < 1.5 && var < 20.0 && uniq_count > 75_000 {
         return 256; // tier-4d-rich: smooth-gradient photo with many colors
     }
-    // Cycle 64: widened detector for "smooth-detail uniq-rich" outliers.
-    // Cycle 61 corpus bench surfaced 4-5 fixtures (NASA mars/astronaut,
-    // Wikimedia high-res, picsum 3840x2560) with SSIM 54-58 at n=208.
-    // Their signature: uniq > 75K (many colors), var < 150 (smooth-ish
-    // content), adj_mn 2-7 (gentle gradients with mid-frequency detail).
-    // Bumping these to n=256 recovers +4-7 SSIM at +5-10% size cost.
-    // Baseline-7 unaffected: 04 (uniq=25K<75K), 06 (var=663>150), 07
-    // (uniq=25K<75K).
-    if adj_mn < 5.0 && var < 150.0 && uniq_count > 75_000 {
+    // Cycle 64 + Cycle 77: widened detector for "smooth-detail uniq-rich"
+    // outliers. Cycle 61 surfaced 4-5 fixtures at SSIM 54-58 at n=208;
+    // Cycle 64 routed (adj_mn<5 + var<150 + uniq>75K) → 256 catching
+    // 04 portrait class. Cycle 77 real-Auto corpus probe found more
+    // outliers (n30 astronaut uniq=68K, n01 mars 72K, p120 family
+    // 67K, p244 4K) all in uniq 50-75K range — just BELOW the Cycle 64
+    // threshold. Sweep showed n=256 lifts SSIM +3-8 at +5-7% size on
+    // these. Drop the uniq threshold from 75K to 50K.
+    //
+    // Baseline-7 unaffected: 04 (uniq=25K<50K), 06 (var=663>150),
+    // 07 (uniq=25K<50K).
+    if adj_mn < 5.0 && var < 150.0 && uniq_count > 50_000 {
         return 256;
     }
     if uniq_count > 100_000 {
-        // Cycle 41: split high-uniq by variance. var > 200 ⇒ truly
-        // stochastic content (e.g. 05 mountain var=320) where palette
-        // quantization noise is hidden by image noise — keep n=192.
-        // var ≤ 200 ⇒ high-detail photo (NASA / high-res landscape /
-        // bird macro) where palette gradient matters — bump to 208.
-        //
-        // 500-corpus bench discovered 90 high-uniq fixtures with
-        // median SSIM 71, p10 61.8 (worst-routed branch). Many were
-        // NASA / Wikimedia photos: adj_mn 3-6, var 35-180. Bumping to
-        // n=208 recovers +3-5 SSIM at +1.6% size on outliers; baseline-7
-        // 05 mountain (var=320 > 200) keeps n=192.
-        if var > 200.0 { 192 } else { 208 }
+        // Cycle 41 + Cycle 77: split high-uniq by variance.
+        // - var > 200 ⇒ stochastic content (05 mountain var=320),
+        //   palette quantisation noise hidden by image noise → n=192
+        // - var ≤ 200 ⇒ photo class. Cycle 77 corpus-real probe
+        //   (NASA n29/n30 + p120-class picsum HD + Wikimedia 5K)
+        //   showed n=208 plateaus at SSIM 56-62 on these. Sweep
+        //   to n=256 lifts SSIM +3-8 at +0-5 % size. The n=256 cap
+        //   IS the PNG palette ceiling — pushing routing TO it
+        //   recovers a quality stratum the previous n=208 wasted.
+        //   Baseline-7 (04 uniq=25K, 06 var=663, 07 uniq=25K)
+        //   doesn't hit this branch.
+        if var > 200.0 { 192 } else { 256 }
     } else {
         208
     }
