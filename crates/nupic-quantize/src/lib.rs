@@ -703,43 +703,43 @@ pub fn classify_for_auto_dither(src_rgba: &[u8], width: u32) -> f32 {
         return 0.0; // tier-1: small
     }
     let opaque_ratio = n_opaque as f64 / n_total as f64;
-    if opaque_ratio < 0.50 {
-        // Phase 3.10 (Cycle 28): tier-1c sharp-mask transparency.
-        // When most pixels are alpha=0 (transparent BG) or alpha=255
-        // (opaque foreground), partial-alpha pixels are rare (< 10%
-        // of total). This is the "object on transparent" pattern,
-        // where palette quantize covers FG colors well and the few
-        // edge pixels benefit from light dither cheaply.
-        //
-        // 22-tree-trans (a_partial=0.052) → d=0.5: +1.8 SSIM / +4% size
-        // 23-statue    (a_partial=0.001) → d=0.5: +0.4 SSIM / +4% size
-        // 01-trans-demo(a_partial=0.291) → stay 0  (smooth-gradient)
-        // 14-soft-trans(a_partial=0.991) → stay 0  (smooth-gradient)
-        let n_partial = n_total - n_opaque - n_zero_alpha;
-        let a_partial_ratio = n_partial as f64 / n_total as f64;
-        if a_partial_ratio < 0.10 {
-            return 0.5; // tier-1c: sharp-mask object on transparent
-        }
-        return 0.0; // tier-1: transparency-dominant (smooth-gradient or mixed)
-    }
+    // Cycle 34: tier-1c/2c sharp-mask peak-d scales with opaque-region
+    // uniq color count. Sweep on 4 corpus fixtures:
+    //
+    //   fixture        opq    a_part  uniq   peak d  peak SSIM
+    //   02 pluto       0.78   0.008   19 K   0.50    80.87
+    //   22 tree-trans  0.30   0.052   26 K   0.70    66.99 (+0.25 vs 0.5)
+    //   23 statue      0.16   0.001   43 K   0.80    80.73 (+0.10 vs 0.5)
+    //   21 earth-hemi  0.60   0.046   86 K   0.85    67.43 (+1.01 vs 0.5)
+    //
+    // peak-d monotonic in uniq. Three-bucket split {<20K → 0.5,
+    // <60K → 0.7, ≥60K → 0.85} hits or near-hits peak on all four:
+    // 02 / 22 / 21 exact peak, 23 routes to 0.7 (gap 0.02 vs 0.8 peak).
+    // Same uniq logic for tier-1c (opq < 0.5) and tier-2c (0.5–0.95);
+    // helper consolidates the count.
     if opaque_ratio < 0.95 {
-        // tier-2: partially-transparent photo. Mirror the tier-1c sharp-
-        // mask split — when partial-alpha pixels are < 10% of total
-        // (object on transparent BG), dither helps cheaply.
-        //
-        // Cycle 28 evidence (a_partial across tier-2 fixtures):
-        //   02 pluto       a_partial=0.008  d=0.50 SSIM 80.87 (peak)
-        //   21 earth-hemi  a_partial=0.046  d=0.50 SSIM 66.42 (+0.50 SSIM
-        //                                                       at +2.6% size)
-        //   (no smooth-gradient tier-2 fixture in corpus yet)
         let n_partial = n_total - n_opaque - n_zero_alpha;
         let a_partial_ratio = n_partial as f64 / n_total as f64;
-        if a_partial_ratio < 0.10 {
-            return 0.5; // tier-2c: sharp-mask partial-transparent photo
+        if a_partial_ratio >= 0.10 {
+            // Smooth-gradient transparency: dither doesn't help.
+            return if opaque_ratio < 0.50 { 0.0 } else { 0.35 };
         }
-        // Cycle 20 default for smooth-gradient tier-2 fixtures (none in
-        // current corpus but safe fallback).
-        return 0.35;
+        // Sharp-mask: route by opaque-region uniq color count.
+        let step_u = if n_total > 1_000_000 { 4 } else { 1 };
+        let mut uniq = std::collections::HashSet::with_capacity(60_500);
+        for p in src_rgba.chunks_exact(4).step_by(step_u) {
+            if p[3] != 255 { continue; }
+            let key = (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16);
+            uniq.insert(key);
+            if uniq.len() > 60_000 { break; }
+        }
+        if uniq.len() > 60_000 {
+            return 0.85; // tier-1c/2c-h: high-uniq sharp-mask (Cycle 34)
+        }
+        if uniq.len() > 20_000 {
+            return 0.7; // tier-1c/2c-m: mid-uniq sharp-mask (Cycle 34)
+        }
+        return 0.5; // tier-1c/2c-l: low-uniq sharp-mask (was Cycle 28)
     }
     // tier-3 vs tier-4: mean-run-length signal.
     let mut runs: u64 = 0;

@@ -19,7 +19,7 @@ version = "1"
 version = "1"
 
 [workspace.package]
-version = "0.5.44"
+version = "0.5.45"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/goliajp/nupic"
