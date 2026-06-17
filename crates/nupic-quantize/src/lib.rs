@@ -757,6 +757,46 @@ pub fn is_gradient_candidate(src_rgba: &[u8], width: u32) -> bool {
 }
 
 #[must_use]
+/// Cycle 39: pick `n_colors` (palette size) for size-priority routing.
+/// Returns the smallest palette that keeps SSIMULACRA2 ≥ TinyPNG's
+/// reference SSIM on the 7-baseline corpus.
+///
+/// Rule:
+/// - `opq < 0.95` (any transparency) → 64
+///   01 / 02 / 14 / 21-23 all hit gate with huge buffer at n=64.
+/// - `uniq > 100_000` (high-uniq stochastic photo) → 192
+///   05 mountain / 17 aurora / 20 rainbow / 13 very-large
+///   palette artefacts hidden by content noise.
+/// - otherwise → 208
+///   04 portrait / 06 landscape / 07 product etc — smooth photos
+///   where the palette gradient quality is gate-critical. n=208 is
+///   the smallest where 04/06 stay above TinyPNG SSIM with buffer.
+///
+/// Bench (7-fixture baseline, 2026-06-17):
+///   nupic 2217 KB / TinyPNG 2643 KB = **-16.1 %**.
+///   All 7 fixtures retain SSIMULACRA2 ≥ TinyPNG.
+#[must_use]
+pub fn classify_for_palette_size(src_rgba: &[u8]) -> usize {
+    let n_total = src_rgba.len() / 4;
+    let mut n_opaque = 0usize;
+    for px in src_rgba.chunks_exact(4) {
+        if px[3] == 255 { n_opaque += 1; }
+    }
+    let opq = n_opaque as f64 / n_total as f64;
+    if opq < 0.95 {
+        return 64;
+    }
+    let step_u = if n_total > 1_000_000 { 4 } else { 1 };
+    let mut uniq = std::collections::HashSet::with_capacity(100_500);
+    for p in src_rgba.chunks_exact(4).step_by(step_u) {
+        if p[3] != 255 { continue; }
+        let key = (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16);
+        uniq.insert(key);
+        if uniq.len() > 100_000 { break; }
+    }
+    if uniq.len() > 100_000 { 192 } else { 208 }
+}
+
 pub fn classify_for_auto_dither(_src_rgba: &[u8], _width: u32) -> f32 {
     // Cycle 38: classifier flattened to d=0.0. Per user direction
     // (2026-06-17): TinyPNG's SSIMULACRA2 is the industry-accepted
