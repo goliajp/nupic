@@ -133,6 +133,101 @@ pub fn quantize_indexed_png(
     } else {
         apply_palette_rgba(src_rgba, width, height, &palette_oklab, &palette_alpha)
     };
+    // Cycle 71: annealed joint optimization. After Lloyd + apply,
+    // run ICM-step + palette-retrain alternating minimization with
+    // λ-decay schedule {0.0001, 0.00005, 0.00002}. On baseline-7
+    // this is the cycle-70 breakthrough: 01 +23.5 SSIM, 03 +11.5,
+    // 04 STRICT positive (size↓ AND SSIM↑). Trigger:
+    //   - n_pixels < 2.5M (keeps 5MP perf untouched)
+    //   - NOT stochastic (var ≥ 200 skipped — joint hurts noise content)
+    let n_total = src_rgba.len() / 4;
+    let small_enough = n_total < 2_500_000;
+    let (indices, palette_oklab, palette_alpha, palette_srgb) = if small_enough {
+        let n_opaque = src_rgba.chunks_exact(4).filter(|p| p[3] == 255).count();
+        let opq = n_opaque as f64 / n_total as f64;
+        let should_anneal = if opq < 0.95 {
+            true
+        } else {
+            // var check using cycle-44's stats
+            let (_adj_mn, var) = compute_adj_lum_diff_stats(src_rgba, width as usize);
+            var < 200.0
+        };
+        if should_anneal {
+            let src_oklab: Vec<Oklab> = src_rgba
+                .chunks_exact(4)
+                .map(|px| srgb_u8_to_oklab(Rgb { r: px[0], g: px[1], b: px[2] }))
+                .collect();
+            let mut idx = indices;
+            let mut pal_ok = palette_oklab.clone();
+            let alpha_vec = palette_alpha.clone();
+            const LAMBDAS: [f32; 3] = [0.0001, 0.00005, 0.00002];
+            let w = width as usize;
+            let h = height as usize;
+            let k = pal_ok.len();
+            for &lambda_sq in &LAMBDAS {
+                // ICM step
+                for y in 0..h {
+                    for x in 0..w {
+                        let i = y * w + x;
+                        let px = src_oklab[i];
+                        let n_up = if y > 0 { idx[i - w] } else { 255 };
+                        let n_dn = if y + 1 < h { idx[i + w] } else { 255 };
+                        let n_lf = if x > 0 { idx[i - 1] } else { 255 };
+                        let n_rt = if x + 1 < w { idx[i + 1] } else { 255 };
+                        let mut best_j = idx[i];
+                        let mut best_cost = f32::INFINITY;
+                        for j in 0..k {
+                            let pj = pal_ok[j];
+                            let dl = px.l - pj.l;
+                            let da = px.a - pj.a;
+                            let db = px.b - pj.b;
+                            let data = dl*dl + da*da + db*db;
+                            let mut s = 0u32;
+                            if n_up != j as u8 && n_up != 255 { s += 1; }
+                            if n_dn != j as u8 && n_dn != 255 { s += 1; }
+                            if n_lf != j as u8 && n_lf != 255 { s += 1; }
+                            if n_rt != j as u8 && n_rt != 255 { s += 1; }
+                            let cost = data + lambda_sq * (s as f32);
+                            if cost < best_cost {
+                                best_cost = cost;
+                                best_j = j as u8;
+                            }
+                        }
+                        idx[i] = best_j;
+                    }
+                }
+                // Palette retrain: centroid = mean of assigned pixels
+                let mut sum_l = vec![0.0f64; k];
+                let mut sum_a = vec![0.0f64; k];
+                let mut sum_b = vec![0.0f64; k];
+                let mut count = vec![0u32; k];
+                for (px, &j) in src_oklab.iter().zip(idx.iter()) {
+                    let ji = j as usize;
+                    sum_l[ji] += px.l as f64;
+                    sum_a[ji] += px.a as f64;
+                    sum_b[ji] += px.b as f64;
+                    count[ji] += 1;
+                }
+                for j in 0..k {
+                    if count[j] > 0 {
+                        let c = count[j] as f64;
+                        pal_ok[j] = Oklab {
+                            l: (sum_l[j] / c) as f32,
+                            a: (sum_a[j] / c) as f32,
+                            b: (sum_b[j] / c) as f32,
+                        };
+                    }
+                }
+            }
+            let new_pal_srgb: Vec<Rgb<u8>> = pal_ok.iter().map(|c| oklab_to_srgb_u8(*c)).collect();
+            (idx, pal_ok, alpha_vec, new_pal_srgb)
+        } else {
+            (indices, palette_oklab, palette_alpha, palette_srgb)
+        }
+    } else {
+        (indices, palette_oklab, palette_alpha, palette_srgb)
+    };
+    let _ = palette_oklab; // silence unused
     let (indices, palette_srgb, palette_alpha) =
         compact_palette(indices, palette_srgb, palette_alpha);
     // Cycle 59: luma-sort palette. Marginal +0-1% size win on
