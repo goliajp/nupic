@@ -1641,6 +1641,11 @@ pub fn encode_indexed_png_with_alpha(
         enc.set_color(png::ColorType::Indexed);
         enc.set_depth(png::BitDepth::Eight);
         enc.set_palette(rgb_palette);
+        // Cycle 54: raw encode uses Fast compression — oxipng will
+        // re-deflate the IDAT anyway, so the intermediate compression
+        // level only affects raw-encode time. Fast saves ~60 ms on 5 MP
+        // with zero final-size impact.
+        enc.set_compression(png::Compression::Fast);
         if let Some(a) = palette_alpha {
             // Trim trailing 255s — PNG spec allows tRNS shorter than the
             // palette, with un-listed entries implicitly opaque.
