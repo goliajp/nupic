@@ -20,12 +20,15 @@ pub fn fixture(w: u32, h: u32) -> Image {
     nupic_core::ops::mock::render(opts).expect("fixture render must succeed")
 }
 
-/// Build a complex-content fixture that exercises encoder compression paths
-/// (many distinct colours, gradient — so palette quantization has room to
-/// move). Stays deterministic and on the public API.
+/// Build a complex-content fixture that exercises the palette-quantize
+/// encoder path. Cycle 60: switched from Gradient to Stripes because
+/// the Cycle 25 gradient-detector routes Gradient content to lossless
+/// (Auto == Lossless byte-identical → broke the original `Auto <
+/// Lossless` assertion). Stripes produces a high-`adj_mn` pattern that
+/// bypasses gradient detection and forces the indexed-palette path.
 pub fn complex_fixture(w: u32, h: u32) -> Image {
     let mut opts = MockOpts::new(Size::new(w, h));
-    opts.style = MockStyle::Gradient;
+    opts.style = MockStyle::Stripes;
     opts.background = Color::rgb(20, 50, 200);
     opts.foreground = Color::rgb(220, 180, 40);
     opts.text = Some(String::new());
