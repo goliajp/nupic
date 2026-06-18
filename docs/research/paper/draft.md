@@ -211,18 +211,128 @@ tile-aware container. Section 8 concludes.
 
 ---
 
+## 4. Cohort Headroom-Mapped Pareto Sweep Protocol
+
+The protocol takes a corpus and an external commercial reference,
+emits both (a) a ceiling diagnosis per failure mode and (b) a
+production routing-table design driver. Five stages, each
+instantiated against TinyPNG + corpus-500.
+
+### 4.1 Cohort construction
+
+Each fixture is placed on two axes against the external reference:
+
+- `size_ratio = nupic_size / tinypng_size`
+- `dssim_delta = nupic_dssim − tinypng_dssim`
+
+The three-axis gate of §3.3 partitions corpus-500 into four piles:
+
+| pile | size_ratio | dssim_delta | n | semantic |
+|---|---|---|---:|---|
+| PASS | ≤ 0.80 | ≤ 0 | 106 | both axes won |
+| Pile A | > 0.80 | ≤ 0 | 307 | size-attackable (quality already wins) |
+| Pile B | ≤ 0.80 | > 0 | 40 | dssim-attackable (size already wins) |
+| Pile C | > 0.80 | > 0 | 53 | dssim-infeasible candidates |
+
+Persisted in `assets/png-bench/corpus-500-three-axis.tsv` (506 rows)
+and `corpus-500-pile-a.tsv` (31-fixture extreme-tail subset used as
+Cycle 106 oracle ground truth). The 4-pile decomposition is the
+critical move: a single global PASS-rate masks both the attack
+direction per fixture and the ceiling structure across the cohort.
+
+### 4.2 Headroom-mapped oracle sweep
+
+For each Pile A fixture, a per-image RD oracle is computed over a
+K × dither × preset grid: K ∈ {64, 96, 128, 160, 192, 224, 256},
+d ∈ {0.0, 0.3, 0.6}, preset ∈ {3, 6} plus optional zopfli rescue —
+roughly 24-42 configurations per fixture, 651 rows for the Cycle 106
+31-fixture Pile A oracle (`assets/png-bench/cycle106-r4/pile_a_grid.tsv`).
+
+The oracle is `arg-min(size) subject to dssim ≤ tiny_dssim`. Two
+cohort-level aggregations matter: (i) winner histogram over (K, d)
+slots, and (ii) DSSIM-tightness bucket → PASS-rate. Both reject the
+naive "best single config" framing; (i) reveals the routing target,
+(ii) reveals the ceiling beyond which no single-palette config can
+go.
+
+### 4.3 Headroom-driven K selection
+
+The Cycle 106 oracle surfaced a counter-intuitive break in the
+"smaller palette ⇒ smaller PNG" monotonicity assumed by every prior
+indexed-PNG codec we surveyed. On Pile A, 18/23 winners selected
+K ∈ {192, 224, 256}, with K=224 the single most-common slot (8/23).
+The DSSIM-bucket cross-tab (Cycle 106 Table 3) explains why:
+photo-class content with `tiny_dssim ≥ 0.005` (i.e. TinyPNG itself
+tolerates non-trivial visual loss) reaches 12/12 PASS at K ≥ 192,
+because larger palettes capture gradient cluster diversity that, in
+turn, lowers PNG filter-chain residual entropy more than the palette
+overhead costs. The headroom map — DSSIM slack on the external
+reference — is the routing signal; raw input features are not.
+
+### 4.4 Per-input routing and the fail-safe wire
+
+A naive single-config K=224 production replacement regresses the
+original PASS pile by 16-25% on stratified samples (Cycle 107,
+`assets/png-bench/cycle107/single_config_sample.tsv`). The
+discriminator p244-vs-wins analysis (Cycle 108, `cycle108/rule_v3_full.tsv`)
+shows no input-only feature — `n_pixels`, `bits/pixel`, luma /
+chroma variance — cleanly separates the 11 K=224 wins from the
+single regression at 99.1% retention; the true discriminator is the
+v1.2.8 baseline output size, accessible only via a 2-pass measure.
+
+The Cycle 109 wire resolves this by construction. For inputs with
+`n_pixels ≥ 5 MP` the encoder runs the v1.2.8 default path and a
+K=224 d=0.3 candidate, then returns `min(default, K_up)`
+(`crates/nupic-core/src/ops/compress.rs:200-275`). PASS retention is
+100% because the default output is always available as a floor.
+Cycle 110 full-corpus verification: +1.5 pp PASS rate over v1.2.8
+(20.9% → 22.4%), 106/106 PASS pile retention, zero real regressions,
+baseline-7 byte-identical. Shipped as v1.2.9 (commit `8ecca8d`).
+
+### 4.5 Generalizability
+
+The protocol decouples three roles that prior PNG-codec work
+conflated: (a) the external reference defines the gate, (b) the
+cohort piles localize the attack surface, (c) the per-input fail-safe
+wire bounds the production downside. None of the three steps depend
+on PNG-specific structure. The same three-step pattern applies to
+JPEG quality-table tuning (gate = libjpeg-turbo Q=75 baseline),
+AVIF tile rate-distortion (gate = libavif preset=6), or any lossy
+codec evaluated against a fixed commercial reference. The K-up
+fail-safe pattern in particular — run the candidate alongside the
+default and return the smaller — generalizes to any monotone-quality
+codec parameter where 2-pass cost is amortizable.
+
+---
+
 ## TODO Next Cycles
 
-- Cycle 116: Section 4 (methodology) + Section 5 (findings C2/C3) draft
-- Cycle 117: Section 6 (R6 ceiling break) + Section 7 (.nupic container) draft
-- Cycle 118: figure pipeline (per-fixture grid heatmaps, cohort PASS
-  histograms, R6 8×8 tile boundary visualizations)
-- Cycle 119: full manuscript pass, references, bibliography
-- Cycle 120: peer review pass (internal or external)
-- Cycle 121+: submission cycle (DCC deadline 早 / IEEE TIP rolling)
+- Cycle 121: Section 5 (findings C2 palette-size break + C3 production wire)
+- Cycle 122: Section 6 (finding C4 R6 spatial-aware) + Container bottleneck
+- Cycle 123: Section 7 (discussion — .nupic container + WebP/AVIF transcoder paths)
+- Cycle 124: Section 8 (conclusion) + figure pipeline (heatmaps / histograms / R6 tile viz)
+- Cycle 125: Section 2 Related Work fill-in (outline → prose) + References finalize
+- Cycle 126: submission-ready pass (typos / format / co-author review)
+- Cycle 127+: submission cycle (DCC deadline 早 / IEEE TIP rolling)
 
 ---
 
 ## References (bibliography stub)
 
-- [will populate Cycle 117-118]
+### Internal (repo) references — Section 4
+
+- Cycle 106 Pile A oracle table report: `.claude/research-ledger/cycle-106-table-report.md`
+- Cycle 107 single-config RED table report: `.claude/research-ledger/cycle-107-table-report.md`
+- Cycle 108 input-feature classifier YELLOW report: `.claude/research-ledger/cycle-108-table-report.md`
+- Cycle 109 P-08 K-up fail-safe GREEN ship report: `.claude/research-ledger/cycle-109-table-report.md`
+- Cycle 110 v1.2.9 full-corpus verification: `.claude/research-ledger/cycle-110-table-report.md`
+- Pile A 31-fixture oracle essay: `docs/research/png/04kkk-cycle106-r4-rd-pile-a.md`
+- Single-config dead end essay: `docs/research/png/04lll-cycle107-single-config-dead.md`
+- Input-feature classifier ceiling essay: `docs/research/png/04mmm-cycle108-input-k-classifier.md`
+- P-08 K-up fail-safe wire essay: `docs/research/png/04nnn-cycle109-p08-kup-failsafe.md`
+- Three-axis corpus partition: `assets/png-bench/corpus-500-three-axis.tsv`
+- Pile A extreme-tail oracle data: `assets/png-bench/cycle106-r4/pile_a_grid.tsv`
+
+### External — Sections 1-3 (TODO populate Cycle 125)
+
+- [will populate Cycle 125 — Related Work fill-in]
