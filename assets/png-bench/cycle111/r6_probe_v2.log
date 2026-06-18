@@ -1,0 +1,12 @@
+wall = 9.0s (54 jobs)
+
+=== Cycle 111 R6 multi-tile feasibility ===
+  p115_1024x768.png            any_pass=Y best_dssim=0.000214 tiny_dssim=0.001970 margin=-0.001756
+  p125_1920x1080.png           any_pass=Y best_dssim=0.001514 tiny_dssim=0.009766 margin=-0.008252
+  p167_1920x1080.png           any_pass=Y best_dssim=0.000161 tiny_dssim=0.000880 margin=-0.000719
+  p175_1920x1080.png           any_pass=Y best_dssim=0.000303 tiny_dssim=0.001966 margin=-0.001663
+  p214_2400x1600.png           any_pass=Y best_dssim=0.001116 tiny_dssim=0.002845 margin=-0.001729
+  p274_3840x2560.png           any_pass=Y best_dssim=0.001568 tiny_dssim=0.003084 margin=-0.001516
+
+R6-quantization DSSIM PASS: 6/6
+→ GREEN — R6 quantization viable, Cycle 112 wire

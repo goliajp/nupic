@@ -10,6 +10,33 @@
 
 ---
 
+## [Cycle 111 · ★★★★★] Spatial-aware quantization breaks the single-global-palette DSSIM ceiling
+
+**Claim**:Cycle 106-110 established that 6 fixtures(p115, p125, p167, p175, p214, p274 — all Picsum HD photo)are **infeasible under any global palette K ∈ {64..256} × dither × lossless 范式**(DSSIM > tiny_dssim 一律 fail)。**8×8 tile × K=192 per-tile imagequant 在 6/6 fixture 上 PASS DSSIM(margins -0.00072 to -0.00825 — comfortable visual-indistinguishable headroom)**。
+
+**机制**:single-global-palette 必须用一组 256 个 OKLab cluster 覆盖整图所有 chromatic region。当图跨多 region(海 + 沙 + 天 + 植物 + 阴影),256 cluster 必有 region 欠拟合。Per-tile palette **allow 不同 region 独立 cluster**,总等价 64 × 192 = 12288 cluster pool spatially distributed。
+
+**Evidence**(三 cycle progression):
+- `assets/png-bench/cycle106-r4/pile_a_grid.tsv` — Cycle 106 oracle K∈{64..256}×d∈{0,0.3,0.6} 6 张 fixture 全 fail DSSIM
+- `assets/png-bench/cycle110/full_verify_v3.tsv` + Cycle 110 lossless probe — 同 6 张 lossless ratio 1.36-1.95× tiny
+- `assets/png-bench/cycle111/r6_probe_v2.tsv` — 8×8 K=192 PASS 6/6,unanimous winning config
+
+**论文化价值**:
+- Cycle 106 + 107 + 108 + 109 + 110 + 111 是连续 6-cycle 完整 paper 主线
+- 三 finding:K-monotonicity break(Cycle 106)+ cohort routing methodology(Cycle 107-108-109)+ spatial-aware ceiling break(Cycle 111)
+- 第三 finding 是 ★★★★★ kernel — 第一个 cohort-level external-reference 驱动的 spatial quantization motivation paper
+
+**目的地**:
+- **DCC full paper / IEEE TIP main paper / ICIP**(三 finding 合并)
+- 第三 finding 单独 sufficient for short paper at PCS / IS&T Imaging
+
+**风险 / 待补**:
+- Cycle 111 仅测 reconstruction DSSIM,**没测 encoder size** — 64 tile × 192 color = 12288 unique 超 PNG palette 256 ceiling 48×,production 不可 ship 标准 PNG container
+- Cycle 112 Path B(R6 → K=256 re-quantize hybrid)将测量 R6 优势能否 survive 到 single-palette 输出 — 这是 production-realizable 路径的核心问题
+- 真 R6 production wiring 需要 tile-aware container(.nupic file format),工程量大
+
+---
+
 ## [Cycle 108 · ★★★] Input-only features hit a ceiling on cohort routing — true discriminator requires 2-pass
 
 **Claim**:对 photo PNG quantize 的 K 选择问题,**任何 input-only feature(n_pixels / bits-per-pixel / image entropy / luma / chroma)都无法 cleanly 区分"K=224 救得了"vs"K=224 救不了"**。真正区分器是 baseline output size(production-side 需 2-pass routing)。

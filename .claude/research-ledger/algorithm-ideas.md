@@ -110,7 +110,7 @@ return bytes_v128;
 
 ---
 
-## [Cycle 106 · open · 可行性低 · ★★★★★] E. Multi-tile palette(R6,Cycle 108-110+)
+## [Cycle 106-111 · status:algorithm-GREEN · 可行性中-encoder-still-open · ★★★★★] E. Multi-tile palette(R6)
 
 **Idea**:每张图切 N tile,每 tile 独立量化 palette,encoder side 用 spatial entropy coder 编码 tile-palette + tile-index。
 
@@ -122,9 +122,15 @@ return bytes_v128;
 - Pile A 6 张 DSSIM-infeasible fixture 全是 high-frequency Picsum photo
 - 已有 R6 multi-tile 文献(LCT-based codec, spatial VQ)给出工程参考点
 
-**下一步**:
-- Cycle 108-pre:量化 multi-tile 范式 oracle 上限(用 ImageMagick 切 tile + 各自 nupic quantize + bench)
-- 若 oracle 把 6 张 DSSIM-infeasible 救回 ≥ 3 张 → Cycle 110 spike 入口
+**Cycle 111 实测**:对 6 张 Cycle 106 DSSIM-infeasible fixture 跑 R6 emulation(N×N tile imagequant K + reassemble):
+- **8×8 tile × K=192 PASS 6/6,DSSIM margin -0.00072 to -0.00825**
+- Cycle 106-110 single-palette ceiling 完全突破
+- **status: algorithm-feasible GREEN,encoder-ship-still-open**
+
+**下一步**(Cycle 112+):
+- **Path B re-quantize hybrid**(cheapest ship 路径):R6 8×8 K=192 reconstruction → 用 imagequant K=256 global re-quantize → 看 R6 优势能保留多少。如 ≥ 3/6 仍 PASS,production wire + v1.2.10 ship。
+- Path A: tile-aware container(.nupic 文件格式)— big work,paper-faithful but ship blocker
+- Path C: WebP / AVIF transcoder for R6 cohort — out-of-scope for PNG codec
 
 ---
 
@@ -191,17 +197,19 @@ return bytes_v128;
 
 ---
 
-## 看板:Cycle 111+ 优先级建议(2026-06-18 Cycle 110 实测后更新)
+## 看板:Cycle 112+ 优先级建议(2026-06-18 Cycle 111 R6 GREEN 后更新)
 
 | rank | 候选 | 状态变化 | 原因 |
 |---:|---|---|---|
-| 1 | **E(R6 multi-tile)** | ↑ 升 rank 1 | Cycle 110 数据明确:6 DSSIM-infeasible + 9 perf-locked Pile A = 15 fixture motivation;single-palette 范式已到 perf+quality 双天花板 |
-| 2 | **preset=6 perf 优化**(rayon parallel oxipng)| 新加 | 解锁 Cycle 108 预测的 9 张 Pile A wins;Cycle 110 数据测出 preset=6 perf 死(p245 10s)是 ship blocker;parallel oxipng 可能解锁 |
-| 3 | C(slow-tier `--effort 9`)| 保持 | 用户 opt-in,perf 不影响 default,价值有限但工程量小 |
-| 4 | B(K-monotonicity 分析)| 保持 | 论文级最高,paper 主线 |
-| 5 | G(filter-entropy guided K)| 保持 | [B] 升级版,paper-track |
-| 6 | D(adaptive dither)| 保持 | 跟 [J] 2-pass 自然合并(已带 d=0.3),不独立做 |
-| (已)| J(2-pass K-up fail-safe)| **SHIPPED v1.2.9** | 100% retention by construction,Pile A 真实 wins 2/307 production preset=5 |
+| 1 | **E. Path B re-quantize hybrid**(R6 8×8 K=192 + global K=256 re-quantize)| 新加,Cycle 112 直接攻 | Cycle 111 R6 algorithm GREEN 6/6;Path B 是 cheapest 可 ship 路径(ships inside PNG),测 R6 优势能否 survive re-quantize |
+| 2 | E. Path A: tile-aware container(.nupic format)| 保持 paper kernel | 工程量大但 paper-faithful;Cycle 113-115+ |
+| 3 | preset=6 perf 优化(rayon parallel oxipng)| 保持 | Cycle 110 数据 unlock +9 Pile A wins;parallel oxipng 可能可行 |
+| 4 | C(slow-tier `--effort 9`)| 保持 | 用户 opt-in 路径 |
+| 5 | B(K-monotonicity 分析)| 保持 | paper main 线 |
+| 6 | G(filter-entropy guided K)| 保持 | [B] 升级版 paper-track |
+| 7 | D(adaptive dither)| 保持 | 已合并到 [J] 不独立 |
+| (已)| **E algorithm-level GREEN by Cycle 111**(8×8 K=192 PASS 6/6 DSSIM)| 工程在 encoder 端 | paper kernel data 已确立,production 路径分 A/B/C 三选 |
+| (已)| J(2-pass K-up fail-safe)| **SHIPPED v1.2.9** | 100% retention by construction |
 | (已)| A(input-only K predictor)| **ceiling-hit by Cycle 108(99.1%)** | 被 [J] 取代 |
-| (已)| F(lossless fallback)| **rejected by Cycle 110(0/6)** | 6 DSSIM-infeasible lossless 全在 1.36-1.95× tiny |
-| (已)| H(single-config K↑ default)| **rejected by Cycle 107** | 留作 anti-pattern 记录 |
+| (已)| F(lossless fallback)| **rejected by Cycle 110(0/6)** | 6 DSSIM-infeasible lossless 全 fail |
+| (已)| H(single-config K↑ default)| **rejected by Cycle 107** | anti-pattern 记录 |
