@@ -1,0 +1,14 @@
+wall = 3.5s (30 jobs)
+
+=== Cycle 116 WebP for R6 cohort ===
+PASS both: 6/6
+
+Best q per fixture:
+  p115_1024x768.png            q=75 size=17.3KB ratio=0.086× DSSIM=0.001373
+  p125_1920x1080.png           q=75 size=46.4KB ratio=0.100× DSSIM=0.007535
+  p167_1920x1080.png           q=85 size=51.3KB ratio=0.116× DSSIM=0.000699
+  p175_1920x1080.png           q=75 size=37.5KB ratio=0.073× DSSIM=0.001389
+  p214_2400x1600.png           q=75 size=102.0KB ratio=0.095× DSSIM=0.001680
+  p274_3840x2560.png           q=75 size=187.9KB ratio=0.077× DSSIM=0.001463
+
+→ GREEN — WebP rescue viable, P-09 wire candidate for v1.2.10

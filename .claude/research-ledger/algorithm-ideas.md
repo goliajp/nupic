@@ -204,7 +204,19 @@ return bytes_v128;
 
 ---
 
-## 看板:Cycle 113+ 优先级建议(2026-06-18 Cycle 112 Path B rejected at strict gate 后更新)
+## 看板:Cycle 117+ 优先级建议(2026-06-19 Cycle 116 WebP GREEN 后更新)
+
+| rank | 候选 | 状态变化 | 原因 |
+|---:|---|---|---|
+| 1 | **WebP transcoder for R6 cohort (Path C)** | **Cycle 116 GREEN 6/6 实测** | size 0.091× tiny mean(11× smaller),DSSIM 6/6 strict,视觉 6/6 OK;Cycle 117 wire `--photo-rescue-webp` flag → v1.2.10 |
+| 2 | C(slow-tier `--effort 9` zopfli)| 保持 | 1 cycle 可 ship,opt-in 不破 default perf |
+| 3 | B + G(K-monotonicity 数学建模)| 保持 | paper-track,跟 paper writeup 平行 |
+| 4 | E. Path A `.nupic` container | **小图 floor blocked by Cycle 113-114** | palette 47 KB fixed 小图不可达,只大图 viable,commercial value 边际 |
+| (已 deprecated)| preset=6 perf 优化 | 实际 +1pp 不值 | Cycle 110 数据显示 preset=6 +1pp 不值 fork oxipng 工程 |
+
+---
+
+## 看板:Cycle 113-116 历史看板(归档)
 
 | rank | 候选 | 状态变化 | 原因 |
 |---:|---|---|---|
