@@ -46,6 +46,19 @@ fn quantize_tile_palette_indexes(rgba: &[u8], w: usize, h: usize, k: u32) -> (Ve
 }
 
 fn zlib_compress(bytes: &[u8]) -> Vec<u8> {
+    // Cycle 114: env-toggle zopfli for stronger entropy coding.
+    // CYCLE114_ZOPFLI=1 → use zopfli iterations=15 (~3-8% tighter than
+    // zlib best, ~10-30× wall — acceptable for size budget check).
+    let use_zopfli = std::env::var("CYCLE114_ZOPFLI").ok().as_deref() == Some("1");
+    if use_zopfli {
+        let opts = zopfli::Options {
+            iteration_count: std::num::NonZeroU64::new(15).unwrap(),
+            ..Default::default()
+        };
+        let mut out = Vec::new();
+        zopfli::compress(opts, zopfli::Format::Zlib, bytes, &mut out).unwrap();
+        return out;
+    }
     use flate2::write::ZlibEncoder;
     use flate2::Compression;
     use std::io::Write;
