@@ -10,6 +10,36 @@
 
 ---
 
+## [Cycle 107 · ★★★] Per-image RD optimum doesn't transfer to cohort routing
+
+**Claim**:Cycle 106 Pile A oracle 选出的"中心赢家 config"(K=224 d=0.3 p=6,7/23 winners)**当作 cohort-wide production default 反而让原 PASS pile 退化 16-25%**。Per-fixture oracle 跟 production-side single-config routing 之间存在结构性 gap — 必须有 input-feature classifier 才能落地。
+
+**机制**:四个 Pile 对 K 有相互矛盾的偏好:
+- PASS pile(mi/synthetic/small):K=128 已够,K=224 增加 palette overhead 无视觉收益
+- Pile A head(tiny_dssim ≥ 0.005):K=224 大胜
+- Pile A tail(tiny_dssim ≤ 0.002):K=224 不够紧
+- Pile B(size pass,DSSIM 微退):K=224 让 size 越界
+- Pile C(双轴微退):K=224 同时让 size 越界 + DSSIM 仍不够
+
+**Evidence**:
+- `assets/png-bench/cycle107/pile_classification.tsv` — corpus-500 506 张二轴分类
+- `assets/png-bench/cycle107/single_config_sample.tsv` — 100 张 stratified sample,K=224 d=0.3 → PASS 22/100(其中 PASS pile 退化 4/25,Pile B/C 几乎无收益)
+- 32-quick-bench 复现同趋势(PASS 退 2/8 = 25%)
+
+**论文化价值**:
+- 是 Cycle 106 "Cohort headroom-mapped Pareto methodology" 那篇的**第二章实验** — 给"为什么需要 per-pile routing 而不是 single oracle config"提供数据
+- 也是 "Per-image RD curve vs cohort gate" 的 negative-result short paper
+
+**目的地**:
+- 跟 Cycle 106 methodology paper 合并(同 venue,DCC / IEEE TIP)
+- Standalone short note 不够独立,但作 cohort routing 设计 protocol 的 case study 极有价值
+
+**风险 / 待补**:
+- 需要 Cycle 108 input-feature classifier 真实验证"per-image routing 能反超 single config"才能立住这条 finding
+- 若 Cycle 108 classifier 也救不了 PASS pile,这条 finding 升级为"routing 范式 fundamental ceiling"(更尖锐的 paper)
+
+---
+
 ## [Cycle 106 · ★★★] Palette-size monotonicity break in indexed PNG
 
 **Claim**:对 photo-class PNG 内容,quantize 时 **K=192-256 经常生成比 K=128 更小的文件**(palette overhead 反而被 filter-chain entropy 收益超过)— 跟 "more palette → larger file" 的朴素直觉相反。

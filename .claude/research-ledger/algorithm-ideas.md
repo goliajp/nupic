@@ -138,14 +138,33 @@
 
 ---
 
-## 看板:Cycle 107+ 优先级建议
+## [Cycle 107 · status:rejected · 可行性高 · ★] H. Single-config K↑ as production default
 
-| rank | 候选 | 原因 |
-|---:|---|---|
-| 1 | A(content-aware K predictor) | 立刻能 ship,把 oracle 25.5% 投影到 production routing(YELLOW → GREEN 的最近路径) |
-| 2 | F(lossless fallback) | 工程量小,可能解锁 6 张 DSSIM-infeasible(若可行 → 直接进 GREEN gate) |
-| 3 | B(K-monotonicity 分析) | 论文级最高,paper 主线;但不是 ship 路径 |
-| 4 | E(R6 multi-tile) | ★★★★★ 远景但工程量大,等 Cycle 107 Pile B/C 分类后再决定是否进入 |
-| 5 | G(filter-entropy guided K) | [B] 升级版,paper-track |
-| 6 | C(slow-tier zopfli) | 易做 ship 路径,但只覆盖 edge case,价值低 |
-| 7 | D(adaptive dither) | 跟 [A] 自然合并,不独立做 |
+**Idea**:不做 input classifier,直接把 `nupic-quantize` default 从 K=128 改成 K=224 d=0.3(Cycle 106 Pile A 最频繁 winning slot)。
+
+**为什么有人会想试**:Cycle 106 oracle 数据里 K=224 是 35% winner share — 看起来"平均最优"。如果能这样省 input classifier 工程,production wire 一行代码搞定。
+
+**Cycle 107 实测结果(rejected)**:
+- 100 张 stratified sample: 22/100 PASS,**原 PASS pile 退化 4/25 = 16%**
+- 32 张 quick bench 复现:7/32 PASS,**原 PASS pile 退化 2/8 = 25%**
+- Pile A 几乎零收益(0/25 / 1/8)— K=224 在 Pile A 尾部 tiny_dssim ≤ 0.002 那段不够紧
+- Pile B/C 也几乎零收益
+
+**Status**:**rejected** — 任何 production replace 都不能接受让现有 PASS pile 退步。
+**Lesson kept**:per-image oracle 不能直接当 cohort-wide single-config 用,必须 input-aware routing(idea A)。
+**Evidence**:`assets/png-bench/cycle107/single_config_sample.tsv`,`docs/research/png/04lll-cycle107-single-config-dead.md`
+
+---
+
+## 看板:Cycle 108+ 优先级建议(2026-06-18 Cycle 107 实测后更新)
+
+| rank | 候选 | 状态变化 | 原因 |
+|---:|---|---|---|
+| 1 | **A(content-aware K predictor)** | ↑ 升级,Cycle 108 唯一可行 ship 路径 | Cycle 107 排除了 single-config(idea H),证明必须 input-aware classifier。训练集已有(Pile A grid TSV) |
+| 2 | F(lossless fallback) | 保持 | 工程量小,可能解锁 Cycle 106 6 张 DSSIM-infeasible,跟 [A] 正交可并行 |
+| 3 | B(K-monotonicity 分析) | 保持 | 论文级最高,paper 主线;不是 ship 路径但 Cycle 109+ paper 收尾期做 |
+| 4 | E(R6 multi-tile) | 保持 | ★★★★★ 远景但工程量大,等 [A] 落地拿到真实 production PASS rate 之后,如果还没到 GREEN 35% 再上 |
+| 5 | G(filter-entropy guided K) | 保持 | [B] 升级版,paper-track |
+| 6 | C(slow-tier zopfli) | 保持 | 易做 ship 路径,但只覆盖 edge case |
+| 7 | D(adaptive dither) | 保持 | 跟 [A] 自然合并,不独立做 |
+| (新)| H(single-config K↑ default) | **rejected by Cycle 107** | 留作 anti-pattern 记录 |

@@ -10,6 +10,10 @@
 //! Modules:
 //! - [`ssim_b1`] — Stone B baseline reimpl(FMA + `#[inline(always)]`
 //!   applied,yuvxyb for color conversion). Backs essay 03b-bis.
+//! - [`bench`] — shared spike helpers: pre-loaded v1.2.8 corpus-500
+//!   baseline (no tinypng_dssim re-compute), stratified sample by
+//!   pile, 4-core rayon pool default. See [[feedback-no-long-sweeps-in-workflow]].
 
 pub mod ssim_b1;
 pub mod codebook_c0;
+pub mod bench;

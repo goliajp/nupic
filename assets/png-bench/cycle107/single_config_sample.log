@@ -1,0 +1,13 @@
+processing 100 stratified-sample fixtures
+done in 57.3s (0.6s/fixture wall)
+
+=== Cycle 107 single-config (K=224 d=0.3 p=6) stratified-sample summary ===
+PASS both  = 22/100 (22.0%)
+size pass  = 47/100 (47.0%)
+dssim pass = 62/100 (62.0%)
+
+Per-pile:
+  PASS   n= 25 pass= 21 ( 84.0%)   size= 23 ( 92.0%)   dssim= 23 ( 92.0%)
+  PileA  n= 25 pass=  0 (  0.0%)   size=  2 (  8.0%)   dssim= 23 ( 92.0%)
+  PileB  n= 25 pass=  1 (  4.0%)   size= 20 ( 80.0%)   dssim=  5 ( 20.0%)
+  PileC  n= 25 pass=  0 (  0.0%)   size=  2 (  8.0%)   dssim= 11 ( 44.0%)
