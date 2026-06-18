@@ -127,9 +127,16 @@ return bytes_v128;
 - Cycle 106-110 single-palette ceiling 完全突破
 - **status: algorithm-feasible GREEN,encoder-ship-still-open**
 
-**下一步**(Cycle 112+):
-- **Path B re-quantize hybrid**(cheapest ship 路径):R6 8×8 K=192 reconstruction → 用 imagequant K=256 global re-quantize → 看 R6 优势能保留多少。如 ≥ 3/6 仍 PASS,production wire + v1.2.10 ship。
-- Path A: tile-aware container(.nupic 文件格式)— big work,paper-faithful but ship blocker
+**Cycle 112 Path B 实测**(R6 → K=256 hybrid):
+- **size 6/6 PASS**(0.46-0.55× tiny,比 v1.2.8 lossless 紧 2-4×)
+- **strict DSSIM 0/6 PASS**(margin +0.00013 to +0.00496,4 张视觉不可分辨)
+- Re-quantize loss 吃光 R6 headroom — **PNG 256-palette container 本质限制**
+- p167 仅差 +0.00013 视觉等价 TinyPNG
+- **Path B 在 strict gate rejected**;留作 "size 大胜 + 视觉等价"finding
+
+**下一步**(Cycle 113+):
+- **Path A: tile-aware container(`.nupic` format)** — paper-faithful strict-gate ship 唯一路径
+- **Paper writeup**:Cycle 106-112 6 cycle 数据已 sufficient,可以转 manuscript
 - Path C: WebP / AVIF transcoder for R6 cohort — out-of-scope for PNG codec
 
 ---
@@ -197,12 +204,13 @@ return bytes_v128;
 
 ---
 
-## 看板:Cycle 112+ 优先级建议(2026-06-18 Cycle 111 R6 GREEN 后更新)
+## 看板:Cycle 113+ 优先级建议(2026-06-18 Cycle 112 Path B rejected at strict gate 后更新)
 
 | rank | 候选 | 状态变化 | 原因 |
 |---:|---|---|---|
-| 1 | **E. Path B re-quantize hybrid**(R6 8×8 K=192 + global K=256 re-quantize)| 新加,Cycle 112 直接攻 | Cycle 111 R6 algorithm GREEN 6/6;Path B 是 cheapest 可 ship 路径(ships inside PNG),测 R6 优势能否 survive re-quantize |
-| 2 | E. Path A: tile-aware container(.nupic format)| 保持 paper kernel | 工程量大但 paper-faithful;Cycle 113-115+ |
+| 1 | **E. Path A: tile-aware container(.nupic format)** | ↑ 升 rank 1 from Cycle 112 RED | Path B 在 strict gate rejected,Path A 是 R6 strict-gate ship 唯一路径;工程量大但 paper-faithful |
+| 1b | **Paper writeup**(Cycle 106-112 6 cycle data sufficient)| 新加 candidate | 转 manuscript,Cycle 113-115 spend on writing |
+| 2 | E. Path B re-quantize hybrid | **rejected at strict DSSIM gate** | size 6/6 ✓ 但 strict DSSIM 0/6 ✗(margin +0.00013 to +0.00496 视觉等价但 metric fail);留作 paper finding |
 | 3 | preset=6 perf 优化(rayon parallel oxipng)| 保持 | Cycle 110 数据 unlock +9 Pile A wins;parallel oxipng 可能可行 |
 | 4 | C(slow-tier `--effort 9`)| 保持 | 用户 opt-in 路径 |
 | 5 | B(K-monotonicity 分析)| 保持 | paper main 线 |

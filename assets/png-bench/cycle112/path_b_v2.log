@@ -1,0 +1,8 @@
+wall = 7.3s (6 fixtures)
+
+=== Cycle 112 Path B: R6 8x8 K=192 → K=256 re-quantize hybrid ===
+PASS both = 0/6 (0%)
+size_pass = 6/6
+dssim_pass = 0/6
+
+→ RED — R6 advantage lost in re-quantize, Path A or paper-only

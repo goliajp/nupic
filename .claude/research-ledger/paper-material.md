@@ -10,6 +10,38 @@
 
 ---
 
+## [Cycle 112 · ★★★★] PNG 256-palette container caps R6 spatial-aware quantization commercial realizability
+
+**Claim**:Cycle 111 R6 8×8 K=192 reconstruction 在 6 张 fixture 上 PASS DSSIM 6/6(margin -0.00072 to -0.00825)。但 R6 reconstruction 总 effective unique colors = 64 tile × 192 = **12288**,远超 PNG indexed palette ceiling **256**。**Cycle 112 测试 R6 → K=256 imagequant re-quantize hybrid:size 6/6 PASS(0.46-0.55× tiny,比 v1.2.8 lossless 紧 2-4×),但 strict DSSIM 0/6 PASS(margin +0.00013 to +0.00496,4 张在视觉不可分辨区)**。Re-quantize loss (1.4-7.4× R6 DSSIM margin)吃光 R6 headroom。
+
+**机制**:
+- R6 突破 DSSIM ceiling 靠 spatial-aware color diversity(12288 effective colors distributed by tile)
+- Single-palette PNG container 强制 merge 12288 → 256 cluster pool
+- merge loss > R6 headroom → strict-gate fail
+- 视觉上 perceptually-invisible(p167 sampled output 跟 TinyPNG visually equivalent)
+
+**这是 paper 的关键 negative finding 转 positive motivation**:
+- 强化 Cycle 111 R6 ★★★★★ kernel:"算法可行,但 container 是 bottleneck"
+- 暗示 ship-able R6 必须 leave standard PNG container(.nupic tile-aware format / WebP-AVIF transcoder)
+- 或者放宽 gate semantics 到 "visually indistinguishable" 而不是 strict DSSIM ≤
+
+**Evidence**:
+- `assets/png-bench/cycle112/path_b{,_v2}.tsv` — 6 张 fixture × R6+K256 hybrid pipeline(d=0.3 + d=0)
+- `assets/png-bench/cycle112/*.png` — 6 张 hybrid output PNG visual eye(p167 macbook + table 砖墙 clean)
+- `assets/png-bench/cycle111/r6_probe_v2.tsv` — R6-only DSSIM baseline 对比
+
+**论文化价值**:
+- 强化 Cycle 111 R6 paper 的 commercial motivation(R6 不仅算法可行,还需 container 改造)
+- Cycle 106-112 完整 arc 6 cycle 全部 evidence
+
+**目的地**:同 Cycle 111 R6 paper(DCC / IEEE TIP)合并
+
+**风险 / 待补**:
+- 视觉等价 vs strict metric 的 gate semantics 是 user-side 决定;paper 应该呈现 both
+- Path A `.nupic` container 工程未做,paper 可能需要 prototype 才有完整 production realizability 论据
+
+---
+
 ## [Cycle 111 · ★★★★★] Spatial-aware quantization breaks the single-global-palette DSSIM ceiling
 
 **Claim**:Cycle 106-110 established that 6 fixtures(p115, p125, p167, p175, p214, p274 — all Picsum HD photo)are **infeasible under any global palette K ∈ {64..256} × dither × lossless 范式**(DSSIM > tiny_dssim 一律 fail)。**8×8 tile × K=192 per-tile imagequant 在 6/6 fixture 上 PASS DSSIM(margins -0.00072 to -0.00825 — comfortable visual-indistinguishable headroom)**。
