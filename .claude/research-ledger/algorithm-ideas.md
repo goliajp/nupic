@@ -76,20 +76,21 @@ return bytes_v128;
 
 ---
 
-## [Cycle 106 · open · 可行性高 · ★] C. Slow-tier zopfli 路由
+## [Cycle 106 → 119 · status:RESOLVED(Cycle 21 ship + Cycle 119 validate)· ★] C. Slow-tier zopfli 路由
 
-**Idea**:加 `nupic compress --effort 9` / `--slow` flag,触发 oxipng + zopfli(30-iter)refine 后处理,救 size-edge fixture。
+**Idea**:加 `nupic compress --effort 9` / `--slow` flag,触发 oxipng + zopfli refine,救 size-edge fixture。
 
-**Why now**:
-- Cycle 106 zopfli probe 救活 2/4 size-edge(n24_sun, p283)
-- ~30 sec/fixture wall cost,production 热路径不行,但批处理 / 离线 / CI 场景值得
+**Resolution(Cycle 119, 2026-06-19)**:
+- Cycle 21 已经 wire `effort ≥ 7 → Zopfli iters=(effort-6)×5, cap 30`
+  在 `nupic_quantize:411-416` + `nupic_core/compress.rs:426-431`
+- 不需要新 flag,`--effort 9` 即为 slow tier
+- Cycle 119 corpus-500 audit:救 16/50 size-edge fixture(0.80-0.85 band 14/25,0.85-0.95 band 2/25)
+- baseline-7 严格不退(0.799→0.795 cohort)
+- 9.83 MP wall 218-245 s,超 60 s KPI 3.6-4.1×(用户 opt-in 接受)
+- 拉 iters 15 → 30 saturate(5/5 NO fixture 没一张 flip,Δ 0.00-0.05%)→ Cycle 21 linear mapping 已经是上限
+- **不改代码,不 bump 版本**,doc 落在 `docs/research/png/04sss-cycle119-effort9-zopfli.md`
 
-**Evidence**:
-- `assets/png-bench/cycle106-r4/emit.tsv` 4 张 edge fixture 的 plain vs zopfli 对比表
-
-**下一步**:
-- Cycle 108+(或 ship 阶段)加 CLI flag + bench + doc
-- 不上 production routing,只 expose 给用户(主动 opt-in)
+**Lesson kept**:遇到"加新 flag"任务先 grep 现状;cycle 21 这种 phase-marked 老 wire 容易被新 kickoff 忽视。
 
 ---
 
@@ -204,14 +205,15 @@ return bytes_v128;
 
 ---
 
-## 看板:Cycle 117+ 优先级建议(2026-06-19 Cycle 116 WebP GREEN 后更新)
+## 看板:Cycle 120+ 优先级建议(2026-06-19 Cycle 119 doc-only YELLOW 后更新)
 
 | rank | 候选 | 状态变化 | 原因 |
 |---:|---|---|---|
-| 1 | **WebP transcoder for R6 cohort (Path C)** | **Cycle 116 GREEN 6/6 实测** | size 0.091× tiny mean(11× smaller),DSSIM 6/6 strict,视觉 6/6 OK;Cycle 117 wire `--photo-rescue-webp` flag → v1.2.10 |
-| 2 | C(slow-tier `--effort 9` zopfli)| 保持 | 1 cycle 可 ship,opt-in 不破 default perf |
-| 3 | B + G(K-monotonicity 数学建模)| 保持 | paper-track,跟 paper writeup 平行 |
-| 4 | E. Path A `.nupic` container | **小图 floor blocked by Cycle 113-114** | palette 47 KB fixed 小图不可达,只大图 viable,commercial value 边际 |
+| 1 | B + G(K-monotonicity 数学建模 / Filter-chain entropy K)| 提到 rank 1 | paper-track 主线,Cycle 115 draft v0.1 之后下一步 measurable 推进 |
+| 2 | D(adaptive dither schedule)| 保持 | Cycle 106 oracle 提示 d=0.3 跟 entropy 关联未 wire |
+| 3 | E. Path A `.nupic` container | **小图 floor blocked by Cycle 113-114** | palette 47 KB fixed 小图不可达,只大图 viable,commercial value 边际 |
+| (已 RESOLVED)| C(slow-tier `--effort 9` zopfli)| **Cycle 21 ship + Cycle 119 validate** | iters=15 saturate,16/50 size-edge flip,doc-only |
+| (已 SHIPPED)| WebP/AVIF transcoder rescue | Cycle 117/118 v1.2.10/11 | opt-in flag,photo content ≥ 0.5 MP |
 | (已 deprecated)| preset=6 perf 优化 | 实际 +1pp 不值 | Cycle 110 数据显示 preset=6 +1pp 不值 fork oxipng 工程 |
 
 ---

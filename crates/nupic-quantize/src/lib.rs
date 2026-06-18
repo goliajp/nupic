@@ -408,6 +408,10 @@ pub fn quantize_indexed_png(
     // effort=10 → 20. Pre-Phase-3.5 effort > 6 had no effect (preset
     // capped at 6, libdeflate). Cycle 21 essay documents the corpus
     // sweep showing zero SSIM regression on all 7 fixtures.
+    //
+    // Cycle 119 corpus-25 spike kept this mapping unchanged: stepping
+    // iters → 30 gave Δ 0.00-0.05% on 5/5 saturating NO fixtures (zero
+    // flip), so the cycle 21 linear iters are already at saturation.
     if opts.oxipng_preset >= 7 {
         let iters = ((opts.oxipng_preset - 6) as u8 * 5).min(30).max(1);
         oxipng_opts.deflate = oxipng::Deflaters::Zopfli {
