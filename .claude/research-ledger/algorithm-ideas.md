@@ -12,22 +12,49 @@
 
 ---
 
-## [Cycle 106 · open · 可行性高 · ★★] A. Content-aware K predictor
+## [Cycle 106-108 · status:ceiling-hit · 可行性高 · ★★] A. Content-aware K predictor
 
-**Idea**:基于 input image features(palette pre-cluster spread / luma gradient entropy / opaque fraction / chroma variance)训一个 decision tree 选 optimal K ∈ {96, 128, 160, 192, 224, 256}。
+**Idea**:基于 input image features(palette pre-cluster spread / luma gradient entropy / opaque fraction / chroma variance / n_pixels / bits-per-pixel)选 K。
 
-**Why now**:
-- Cycle 106 数据(`pile_a_grid.tsv`)给出 31 fixture × 21 config 的 oracle ground truth,直接作训练集
-- 赢家 K 分布跟 tiny_dssim 强相关,但 production 看不到 tiny_dssim,需 input-only surrogate feature
-- 简单 decision tree / piecewise linear 就可能 ship,不需要 ML 框架
+**Cycle 108 实测结果**:
+- 最简 rule:`n_pixels ≥ 5MP → K=224 d=0.3` 全 corpus-500 测
+- 总 PASS 23.4%(106 → 120,**+14 净涨**)
+- **PASS pile retention 99.1%(105/106)** — 1 张退化 p244
+- 试遍 input features(bpp_in、bpp_v128、n_pixels、luma/chroma)**无法 cleanly 区分 p244 vs 11 张 wins**
+- input-only feature 路径 **ceiling 在 99.1%**,无法到 100%
+
+**Status**:**ceiling-hit** — input-feature 单独不够,Cycle 109 转 [J. 2-pass fail-safe](升级版)。
+
+**Lesson kept**:Input feature 当**廉价 trigger gate**(决定要不要走 2-pass)仍然有用 — 不全废。
+
+---
+
+## [Cycle 108 · status:open · 可行性高 · ★★★] J. 2-pass K-up fail-safe routing(A 的升级)
+
+**Idea**:production hot path 跑 2 次 quantize,根据 K=128 输出大小决定要不要升 K=224。
+```rust
+let bytes_v128 = quantize(raw, K=128, ...);  // production current
+if n_pixels >= 5_000_000 && bytes_v128.len() > input_size * 78 / 100 {
+    let bytes_v224 = quantize(raw, K=224, d=0.3);
+    if bytes_v224.len() < bytes_v128.len() { return bytes_v224; }
+}
+return bytes_v128;
+```
+
+**Why this beats A**:
+- **100% PASS pile retention by construction** — 选 min(K=128, K=224) 永远不让 output 比 K=128 大
+- Trigger gate `n_pixels ≥ 5MP AND bytes_v128 > 0.78 × input_size` 是 input-only(不需 tiny baseline)
+- production cost ~1.5× wall on 14.8% corpus(≥5MP)— 在 perf NAS/CDN target 内
 
 **Evidence**:
-- Pile A 23 winners 中 K=224 占 8/23(35%),K=192 占 5/23(22%)— 即使**朴素永远选 K=224 也可能拿到 ~50% Pile A oracle gain**
-- 在 baseline-7 上要避免回退(05 mountain 已经微输 0.001,经不起再退)
+- Cycle 108 数据显示 input-feature 路径 ceiling 99.1%,2-pass 是唯一 100% 路径
+- Cycle 108 rule v3 数据 + p244 反例直接 motivate 这条 routing
 
-**下一步**:
-- Cycle 108-pre:写 input feature extractor + decision tree fitter,用 Pile A oracle ground truth 训练,leave-one-out cross-validation
-- 在非 Pile A 的 corpus-500 fixture 上验证 routing 不退步
+**Cycle 109 spike**:
+- 改 `crates/nupic-core/src/ops/compress.rs:225` 加 2-pass fail-safe
+- bench 跑 32 quick + corpus-500 full(全 GREEN gate)
+- 219 workspace tests + baseline-7 sanity 必过
+- 通过 → bump v1.2.9 + ship + push
 
 ---
 
@@ -156,15 +183,16 @@
 
 ---
 
-## 看板:Cycle 108+ 优先级建议(2026-06-18 Cycle 107 实测后更新)
+## 看板:Cycle 109+ 优先级建议(2026-06-18 Cycle 108 实测后更新)
 
 | rank | 候选 | 状态变化 | 原因 |
 |---:|---|---|---|
-| 1 | **A(content-aware K predictor)** | ↑ 升级,Cycle 108 唯一可行 ship 路径 | Cycle 107 排除了 single-config(idea H),证明必须 input-aware classifier。训练集已有(Pile A grid TSV) |
-| 2 | F(lossless fallback) | 保持 | 工程量小,可能解锁 Cycle 106 6 张 DSSIM-infeasible,跟 [A] 正交可并行 |
+| 1 | **J(2-pass K-up fail-safe routing)** | ↑ 升级 from idea A,Cycle 109 直接攻 | 用户选 path B(100% retention)。production cost 1.5× 在 perf budget 内,工程量小 |
+| 2 | F(lossless fallback) | 保持 | 工程量小,可能解锁 Cycle 106 6 张 DSSIM-infeasible,跟 [J] 正交可并行 |
 | 3 | B(K-monotonicity 分析) | 保持 | 论文级最高,paper 主线;不是 ship 路径但 Cycle 109+ paper 收尾期做 |
-| 4 | E(R6 multi-tile) | 保持 | ★★★★★ 远景但工程量大,等 [A] 落地拿到真实 production PASS rate 之后,如果还没到 GREEN 35% 再上 |
+| 4 | E(R6 multi-tile) | 保持 | ★★★★★ 远景但工程量大,等 [J] 落地拿到真实 production PASS rate 之后,如果还没到 GREEN 35% 再上 |
 | 5 | G(filter-entropy guided K) | 保持 | [B] 升级版,paper-track |
 | 6 | C(slow-tier zopfli) | 保持 | 易做 ship 路径,但只覆盖 edge case |
-| 7 | D(adaptive dither) | 保持 | 跟 [A] 自然合并,不独立做 |
-| (新)| H(single-config K↑ default) | **rejected by Cycle 107** | 留作 anti-pattern 记录 |
+| 7 | D(adaptive dither) | 保持 | 跟 [J] 2-pass 自然合并(K-up branch 已经带 d=0.3),不独立做 |
+| (旧)| A(input-only K predictor) | **ceiling-hit by Cycle 108(99.1%)** | 单 input feature 路径 ceiling 99.1%,被 [J] 取代 |
+| (旧)| H(single-config K↑ default) | **rejected by Cycle 107** | 留作 anti-pattern 记录 |

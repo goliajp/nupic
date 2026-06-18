@@ -1,0 +1,16 @@
+pile sample: 32, baseline-7 in corpus-500: 0
+wall = 56.5s (32 pile + 7 b7 = 39 fixtures)
+
+=== Cycle 108 rule: n_pixels<2M→K128, else→K224 d=0.3 ===
+PASS 6/39 (15.4%)
+  PASS   n=  8 pass=  2 ( 25.0%)
+  PileA  n=  8 pass=  2 ( 25.0%)
+  PileB  n=  8 pass=  0 (  0.0%)
+  PileC  n=  8 pass=  0 (  0.0%)
+  b7     n=  7 pass=  2 ( 28.6%)
+
+Decision gate:
+  PASS pile retention: N (FAIL)
+  baseline-7 retention (≥5/7): N (FAIL)
+  Total PASS rate: 15.4%
+  → RED (regression)

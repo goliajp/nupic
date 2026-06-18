@@ -1,0 +1,23 @@
+pile sample: 32, baseline-7 in corpus-500: 0
+wrote 36625 bytes (Png, 800×600) to /var/folders/rx/1_v1d0s92wsd6fqr8_dfq9j80000gn/T/c108-b7/01-png-transparency-demo.png
+wrote 60789 bytes (Png, 632×632) to /var/folders/rx/1_v1d0s92wsd6fqr8_dfq9j80000gn/T/c108-b7/02-pluto-transparent.png
+wrote 10135 bytes (Png, 200×183) to /var/folders/rx/1_v1d0s92wsd6fqr8_dfq9j80000gn/T/c108-b7/03-wikipedia-logo.png
+wrote 434158 bytes (Png, 1200×800) to /var/folders/rx/1_v1d0s92wsd6fqr8_dfq9j80000gn/T/c108-b7/04-photo-portrait.png
+wrote 326977 bytes (Png, 1200×800) to /var/folders/rx/1_v1d0s92wsd6fqr8_dfq9j80000gn/T/c108-b7/05-photo-mountain.png
+wrote 997089 bytes (Png, 1600×900) to /var/folders/rx/1_v1d0s92wsd6fqr8_dfq9j80000gn/T/c108-b7/06-photo-landscape.png
+wrote 296363 bytes (Png, 1024×768) to /var/folders/rx/1_v1d0s92wsd6fqr8_dfq9j80000gn/T/c108-b7/07-photo-product.png
+wall = 47.8s (32 pile + 7 b7 = 39 fixtures)
+
+=== Cycle 108 rule: n_pixels<2M→K128, else→K224 d=0.3 ===
+PASS 12/39 (30.8%)
+  PASS   n=  8 pass=  7 ( 87.5%)
+  PileA  n=  8 pass=  1 ( 12.5%)
+  PileB  n=  8 pass=  0 (  0.0%)
+  PileC  n=  8 pass=  0 (  0.0%)
+  b7     n=  7 pass=  4 ( 57.1%)
+
+Decision gate:
+  PASS pile retention: N (FAIL)
+  baseline-7 retention (≥5/7): N (FAIL)
+  Total PASS rate: 30.8%
+  → RED (regression)

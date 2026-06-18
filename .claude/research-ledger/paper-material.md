@@ -10,6 +10,37 @@
 
 ---
 
+## [Cycle 108 · ★★★] Input-only features hit a ceiling on cohort routing — true discriminator requires 2-pass
+
+**Claim**:对 photo PNG quantize 的 K 选择问题,**任何 input-only feature(n_pixels / bits-per-pixel / image entropy / luma / chroma)都无法 cleanly 区分"K=224 救得了"vs"K=224 救不了"**。真正区分器是 baseline output size(production-side 需 2-pass routing)。
+
+**Evidence**:
+- Cycle 108 rule v3 在全 corpus-500 上 PASS pile 99.1% retention(105/106),**仅 1 张退化 p244**
+- p244 vs 11 张 wins 在 bpp_in (5.20 vs 1.62-5.14)、bpp_v128 (1.48 vs 0.97-3.63)、n_pixels (9.83 MP 同) 等 input-only feature 上**全部重叠 / 无法 clean separation**
+- 真正 discriminator: p244 的 v1.2.8 baseline output ratio 0.791× ≤ 0.80 cap(已 PASS,不需要救),而 11 张 wins 都 > 1.0×(必须救)
+
+**机制**:
+- Cycle 107 已证明 "K=224 single config" 让 16-25% PASS pile 退化
+- Cycle 108 尝试用 input-feature classifier 缩小退化(99.1% achievable)
+- 但 **input-feature 路径有结构性 ceiling**(p244-class fixture 跟 wins 在 input-feature 空间不可分)
+- 2-pass routing(先 K=128 看 size,再决定升 K)是已知唯一 100% retention 路径
+- 这是 RD theory 里 "rate-distortion 函数依赖 source distribution" 的实证 —— 单 image features 无法替代 measured RD curve
+
+**论文化价值**:
+- 跟 [Cycle 107 "Per-image RD optimum doesn't transfer"] 那条形成**双胞胎 finding** —— Cycle 107 证明 "single config 不行"、Cycle 108 证明 "input-feature classifier 也不够"
+- 一起组成 "**cohort routing 必须 measured(2-pass)而非 predicted(features-only)**" 的核心论证
+- 跟 cohort headroom methodology paper 合并,作其第三章实验
+
+**目的地**:
+- DCC / IEEE TIP methodology paper(跟 Cycle 106 + Cycle 107 一起)
+- 升级为 paper 主体之一
+
+**风险 / 待补**:
+- 需要 Cycle 109 2-pass production wiring 真做出来,在 corpus-500 全测拿到 100% retention 数据才能立住 claim
+- p244 还可能有更隐微的 input feature(如 chroma covariance, FFT spectral content)能区分 —— 没全部尝试。但即使能,工程复杂度肯定不如 2-pass 简洁
+
+---
+
 ## [Cycle 107 · ★★★] Per-image RD optimum doesn't transfer to cohort routing
 
 **Claim**:Cycle 106 Pile A oracle 选出的"中心赢家 config"(K=224 d=0.3 p=6,7/23 winners)**当作 cohort-wide production default 反而让原 PASS pile 退化 16-25%**。Per-fixture oracle 跟 production-side single-config routing 之间存在结构性 gap — 必须有 input-feature classifier 才能落地。
