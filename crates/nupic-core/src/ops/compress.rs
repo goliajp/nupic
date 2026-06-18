@@ -205,46 +205,66 @@ fn encode_png_stone_c(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     // 08-gradient-large evidence:
     //   palette quantize + d=0.7  = 497 KB / SSIMULACRA2 68.08
     //   lossless                  =  53 KB / SSIMULACRA2 100.00
-    if nupic_quantize::is_gradient_candidate(&raw, w) {
+    let n_pixels_u64 = (w as u64) * (h as u64);
+    let p08_eligible = n_pixels_u64 >= 5_000_000;
+    let is_grad = nupic_quantize::is_gradient_candidate(&raw, w);
+
+    // Compute the v1.2.8 default output(unchanged routing).
+    let bytes_default: Vec<u8> = if is_grad {
         // Cycle 62: when Auto routes gradient content to lossless on
-        // large images, downgrade oxipng preset to keep latency
-        // bounded. Explicit `Quality::Lossless` users still get
-        // preset=5 (size-priority) — this only affects Auto-gradient.
+        // large images, downgrade oxipng preset to keep latency bounded.
         let n_pixels = (w as usize) * (h as usize);
         if n_pixels >= 5_000_000 && opts.effort == 5 {
             let mut auto_opts = opts.clone();
             auto_opts.effort = 1;
-            return encode_png_lossless(img, &auto_opts);
+            encode_png_lossless(img, &auto_opts)?
+        } else {
+            encode_png_lossless(img, opts)?
         }
-        return encode_png_lossless(img, opts);
-    }
-    // Cycle 39: size-priority routing — adaptive palette size per
-    // signals (opq + uniq) keeps SSIM ≥ TinyPNG while saving 5-58 %
-    // size per fixture vs n=256. See `classify_for_palette_size`.
-    let (n_colors, importance_alpha) =
-        nupic_quantize::classify_for_palette_size_with_importance(&raw, w as usize);
-    // Cycle 105 P-03: sharp-mask logos (03 wiki class) bump oxipng preset
-    // from the adaptive default (3 on <2MP) to 6 to extract the second
-    // half of the Cycle 102 spike's savings (10135 B vs 12253 B at p=3).
-    // Trigger predicate `opq<0.95 ∧ adj_mn>5 ∧ uniq_opq<500` validated
-    // on the 30-fixture Cycle 105 cohort: triggers exactly on 03 wiki,
-    // does not false-trigger on any other fixture.
-    let p03_preset_boost = opts.effort == nupic_quantize::QuantizeOpts::default().oxipng_preset
-        && nupic_quantize::is_p03_sharp_mask_logo(&raw, w as usize);
-    let qopts = nupic_quantize::QuantizeOpts {
-        n_colors,
-        // Cycle 21: pass full effort 0-10 through (was capped at 6).
-        // quantize_indexed_png internally caps libdeflate preset at 6,
-        // and treats effort ≥ 7 as opt-in Zopfli deflater (slower,
-        // -0.3% corpus size, 0 SSIM regression).
-        oxipng_preset: if p03_preset_boost { 6 } else { opts.effort.min(10) },
-        strip_metadata: opts.strip_metadata,
-        dither_strength: opts.dither_strength,
-        // Cycle 43: importance-sampled Lloyd for stochastic content.
-        importance_alpha,
+    } else {
+        // Cycle 39 + Cycle 105 path: classify K, P-03 preset boost.
+        let (n_colors, importance_alpha) =
+            nupic_quantize::classify_for_palette_size_with_importance(&raw, w as usize);
+        let p03_preset_boost = opts.effort == nupic_quantize::QuantizeOpts::default().oxipng_preset
+            && nupic_quantize::is_p03_sharp_mask_logo(&raw, w as usize);
+        let qopts = nupic_quantize::QuantizeOpts {
+            n_colors,
+            oxipng_preset: if p03_preset_boost { 6 } else { opts.effort.min(10) },
+            strip_metadata: opts.strip_metadata,
+            dither_strength: opts.dither_strength,
+            importance_alpha,
+        };
+        nupic_quantize::quantize_indexed_png(&raw, w, h, qopts)
+            .map_err(|e| Error::Codec(Box::new(e)))?
     };
-    nupic_quantize::quantize_indexed_png(&raw, w, h, qopts)
-        .map_err(|e| Error::Codec(Box::new(e)))
+
+    // Cycle 109 P-08 K-up fail-safe (algorithm-ideas idea J): on HD
+    // photo content (≥ 5 MP), Cycle 106 Pile A oracle showed K=192-256
+    // + d=0.3 wins large size drops (mean 0.59× TinyPNG) while DSSIM
+    // stays within the acceptable band. Cycle 107 proved single-config
+    // K=224 regresses small-image PASS. Cycle 108 input-only feature
+    // classifier hit a ceiling at 99.1% (one fixture, p244, doesn't
+    // separate from wins on any image feature). The fix: on ≥ 5MP, try
+    // K=224 d=0.3 α=0 and pick the smaller of {default, K=224} —
+    // 100% retention by construction. Always evaluates the K=224
+    // candidate, including against the gradient-lossless path, since
+    // Cycle 106 data shows K=224 sometimes beats lossless 4× (p245:
+    // lossless 2.74 MB vs K=224 0.68 MB on the same content).
+    if p08_eligible {
+        let kup_opts = nupic_quantize::QuantizeOpts {
+            n_colors: 224,
+            oxipng_preset: opts.effort.min(10),
+            strip_metadata: opts.strip_metadata,
+            dither_strength: 0.3,
+            importance_alpha: 0.0,
+        };
+        if let Ok(bytes_v224) = nupic_quantize::quantize_indexed_png(&raw, w, h, kup_opts) {
+            if bytes_v224.len() < bytes_default.len() {
+                return Ok(bytes_v224);
+            }
+        }
+    }
+    Ok(bytes_default)
 }
 
 /// Experimental `Quality::Auto` PNG path that uses the self-built

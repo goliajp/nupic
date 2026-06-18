@@ -29,7 +29,7 @@
 
 ---
 
-## [Cycle 108 · status:open · 可行性高 · ★★★] J. 2-pass K-up fail-safe routing(A 的升级)
+## [Cycle 108-109 · status:SHIPPED v1.2.9 · 可行性高 · ★★★] J. 2-pass K-up fail-safe routing(A 的升级)
 
 **Idea**:production hot path 跑 2 次 quantize,根据 K=128 输出大小决定要不要升 K=224。
 ```rust
