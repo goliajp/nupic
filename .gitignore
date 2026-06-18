@@ -1,6 +1,8 @@
 /target
 .DS_Store
-.claude/
+# Claude Code: ignore local per-machine config but commit project-level ledger
+.claude/settings.json
+.claude/settings.local.json
 
 # PNG-bench large research datasets (regenerable via TinyPNG API + scripts/png-bench/)
 /assets/png-bench/corpus-500/

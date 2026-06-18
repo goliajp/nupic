@@ -1,0 +1,8 @@
+Pile A: 31 fixtures loaded
+
+=== Pile A summary ===
+fixtures = 31
+pass_both = 10/31 (32.3%)
+pass_size_only = 29/31 (93.5%)
+pass_dssim_only = 12/31 (38.7%)
+cohort total: best=15496940 B  tiny=36226987 B  ratio=0.4278x
