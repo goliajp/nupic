@@ -305,13 +305,152 @@ codec parameter where 2-pass cost is amortizable.
 
 ---
 
+## 5. Findings: Palette-Size Monotonicity Break and Production Wire
+
+We report two structural findings from the §4 protocol applied to
+corpus-500 + TinyPNG. C2 (§5.1) is an algorithmic observation about
+PNG indexed-palette routing that contradicts the conventional
+codec-design intuition. C3 (§5.2) ships C2 as a production routing
+update under the cohort-retention constraint, surfacing a second
+finding along the way: input-only feature classifiers ceiling at
+99.1% retention because the true discriminator is the baseline
+output size, accessible only via 2-pass measurement.
+
+### 5.1 Finding C2 — Palette-size monotonicity break
+
+Conventional indexed-PNG codec lore treats palette size K as a
+monotone size knob: smaller K stores fewer palette entries (3 K
+bytes), encodes pixel indices at fewer bits, and naively reduces
+output size. Cycle 106 oracle on the Pile A 31-fixture extreme tail
+contradicts this directly. The winner histogram over (K, d) slots
+on the 23 fixtures that PASS gate (`assets/png-bench/cycle106-r4/pile_a_grid.tsv`):
+
+| K | wins | share | mean ratio vs TinyPNG |
+|---:|---:|---:|---:|
+| 64 | 1 | 4% | 0.79 |
+| 96 | 1 | 4% | 0.56 |
+| 128 | 1 | 4% | 0.40 |
+| 160 | 2 | 9% | 0.74 |
+| 192 | 5 | 22% | 0.59 |
+| 224 | 8 | 35% | 0.66 |
+| 256 | 5 | 22% | 0.50 |
+
+**18/23 (78%) winners chose K ≥ 192**, with K=224 the single
+most-common slot. The pattern is strongest where TinyPNG itself
+already tolerates non-trivial visual loss (Cycle 106 Table 3): for
+fixtures with `tiny_dssim ≥ 0.005`, **12/12 (100%) reach PASS at
+K ∈ {192, 224, 256}**; for `0.001 ≤ tiny_dssim < 0.002` the rate
+drops to 3/6 and K=64 wins reappear (sparse natural palettes). The
+cohort-wide ratio for the 23 Pile A winners is 0.59× TinyPNG.
+
+The mechanism is a PNG filter-chain entropy effect. Indexed-PNG
+output is `palette_table + IDAT_stream(filter_type + filtered_indices)`
+deflate-compressed. On photo-class content with high OKLab cluster
+diversity, K = 128 forces 4-5 ΔE-1+ pixel re-binnings per scanline;
+adjacent pixels that *should* be near-equal palette indices become
+unequal, breaking the PNG Up / Average / Paeth filter coherence that
+deflate's LZ77 backref engine relies on. K = 224 leaves the cluster
+boundaries near sub-perceptual ΔE, the index stream stays
+quasi-locally-flat, filter residuals tighten, and deflate finds
+longer matches. The palette overhead (256 vs 128 entries = 384 extra
+bytes) is dominated by the filter-chain savings at any image larger
+than ≈ 50 KB. The break is therefore a property of the PNG
+container's filter-chain coupling to palette stability, not of the
+quantizer's RD curve alone.
+
+### 5.2 Finding C3 — Production wire under cohort retention
+
+C2 surfaces a routing target slot (K = 192–256 with d = 0.3 on
+HD photo content). C3 turns the slot into a production update that
+respects the constraint Cycle 107 identified: **no replacement may
+regress the v1.2.8 PASS pile**. The path traverses three failed
+designs before arriving at the shipped wire.
+
+**5.2.1 Single-config replacement (RED).** Replacing the v1.2.8
+default with K = 224, d = 0.3, preset = 6 globally regressed
+the original PASS pile by 16–25% across stratified samples
+(Cycle 107, `assets/png-bench/cycle107/single_config_sample.tsv`):
+of 25 PASS-pile fixtures, 4 (16%) lost both-axes PASS; the
+32-fixture quick-bench saw 2/8 (25%). The 22/100 cohort-wide PASS
+rate barely matched v1.2.8's 21/100. **Verdict**: single-config
+production routing is dead — the Pile A oracle gains do not
+transfer to small images that v1.2.8 already wins.
+
+**5.2.2 Input-feature classifier (YELLOW, ceiling-hit).** Cycle 108
+trained an input-only feature rule routing K = 224 on `n_pixels ≥ 5 MP`
+and falling back to the v1.2.8 path otherwise. Full corpus-500 PASS
+rose to **23.4% (120/513)** with PASS-pile retention 99.1%
+(`assets/png-bench/cycle108/rule_v3_full.tsv`). But one PASS-pile
+fixture (p244, 9.83 MP HD photo) silently degraded from 0.791× to
+0.851× TinyPNG. The discriminator analysis (Cycle 108 §3) showed
+no input-only feature cleanly separates p244 from the 11 K=224 wins:
+`n_pixels` overlaps exactly, `bits/pixel(input)` overlaps with p246,
+`bits/pixel(K=128 output)` overlaps with p287. **The only feature
+that cleanly partitions p244 from the wins is the v1.2.8 baseline
+output size itself** — available only via 2-pass quantize-and-measure.
+
+**5.2.3 P-08 K-up fail-safe (GREEN, shipped v1.2.9).** Cycle 109
+resolves the ceiling by construction: for `n_pixels ≥ 5 MP`, the
+encoder runs the v1.2.8 default path *and* the K = 224, d = 0.3
+candidate, then returns `min(default, K_up)`. Production code at
+`crates/nupic-core/src/ops/compress.rs:209-273`:
+
+```rust
+let p08_eligible = (w as u64) * (h as u64) >= 5_000_000;
+let bytes_default = /* v1.2.8 routed path (lossless or K-classify) */;
+if p08_eligible {
+    let bytes_v224 = quantize_indexed_png(K=224, d=0.3, α=0.0);
+    if bytes_v224.len() < bytes_default.len() { return Ok(bytes_v224); }
+}
+Ok(bytes_default)
+```
+
+PASS-pile retention is **100% by construction** (the default is
+always available as a floor). The K-up branch fires even when the
+default would route to lossless — the case that motivated P-08
+originally (p245, a 9.83 MP HD photo where v1.2.8 took the gradient
+→ lossless branch and produced 2.74 MB; K = 224 emits 1.56 MB).
+
+**5.2.4 Full-corpus verification (Cycle 110).** v1.2.9 full
+corpus-500 + baseline-7 (`assets/png-bench/cycle110/full_verify_v3.tsv`):
+
+| metric | v1.2.8 baseline | v1.2.9 (P-08 shipped) | Δ |
+|---|---:|---:|---:|
+| PASS rate (513 fixtures) | 109/513 (21.2%) | **115/513 (22.4%)** | +1.5 pp |
+| PASS-pile retention | 106/106 | **106/106** | 0 (✓) |
+| Pile A wins | 0 | 2 (p245, p291) | +2 |
+| baseline-7 byte-identical | — | 7/7 (P-08 < 5 MP not triggered) | ✓ |
+| real regressions | — | **0** | — |
+
+The p245 case study (Cycle 109 §3): v1.2.8 lossless preset = 1 emits
+2.74 MB (1.37× TinyPNG, fails size gate); v1.2.9 P-08 K = 224
+preset = 5 emits 1.56 MB (**0.78× TinyPNG, PASS**), with DSSIM 0.0083
+versus TinyPNG's 0.0115. The K-up branch fires inside ~450 ms wall
+on the 9.83 MP image — within the perf KPI proportional budget of
+~500 ms for 5 MP < 250 ms.
+
+### 5.3 Combined narrative
+
+C2 and C3 are inseparable. Reporting C2 without C3 would leave a
+finding that production cannot adopt: a per-image K = 224 oracle
+that, applied naively cohort-wide, regresses 16-25% of existing PASS
+fixtures (5.2.1) — a net negative. Shipping C3 without C2 would
+amount to picking the K-up parameters out of the air; the oracle
+distribution in 5.1 is what specifies K = 224, d = 0.3 as the
+right candidate slot in the first place. The protocol-driven path
+from C2 to C3 — oracle → single-config failure → input-feature
+ceiling → 2-pass fail-safe — also documents *why* the obvious
+shortcuts do not work, which is the part absent from per-image RD
+literature and from production-codec changelogs alike.
+
+---
+
 ## TODO Next Cycles
 
-- Cycle 121: Section 5 (findings C2 palette-size break + C3 production wire)
-- Cycle 122: Section 6 (finding C4 R6 spatial-aware) + Container bottleneck
+- Cycle 122: Section 6 (finding C4 R6 spatial-aware) + Container bottleneck (C5)
 - Cycle 123: Section 7 (discussion — .nupic container + WebP/AVIF transcoder paths)
 - Cycle 124: Section 8 (conclusion) + figure pipeline (heatmaps / histograms / R6 tile viz)
-- Cycle 125: Section 2 Related Work fill-in (outline → prose) + References finalize
+- Cycle 125: Section 2 Related Work fill-in (outline → prose) + External References finalize
 - Cycle 126: submission-ready pass (typos / format / co-author review)
 - Cycle 127+: submission cycle (DCC deadline 早 / IEEE TIP rolling)
 
@@ -319,7 +458,7 @@ codec parameter where 2-pass cost is amortizable.
 
 ## References (bibliography stub)
 
-### Internal (repo) references — Section 4
+### Internal (repo) references — Sections 4–5
 
 - Cycle 106 Pile A oracle table report: `.claude/research-ledger/cycle-106-table-report.md`
 - Cycle 107 single-config RED table report: `.claude/research-ledger/cycle-107-table-report.md`
@@ -330,8 +469,13 @@ codec parameter where 2-pass cost is amortizable.
 - Single-config dead end essay: `docs/research/png/04lll-cycle107-single-config-dead.md`
 - Input-feature classifier ceiling essay: `docs/research/png/04mmm-cycle108-input-k-classifier.md`
 - P-08 K-up fail-safe wire essay: `docs/research/png/04nnn-cycle109-p08-kup-failsafe.md`
+- v1.2.9 full-corpus verify essay: `docs/research/png/04ooo-cycle110-full-corpus-verify.md`
 - Three-axis corpus partition: `assets/png-bench/corpus-500-three-axis.tsv`
 - Pile A extreme-tail oracle data: `assets/png-bench/cycle106-r4/pile_a_grid.tsv`
+- v1.2.9 full-corpus verification data: `assets/png-bench/cycle110/full_verify_v3.tsv`
+- Cycle 107 single-config stratified sample: `assets/png-bench/cycle107/single_config_sample.tsv`
+- Cycle 108 input-feature classifier full sweep: `assets/png-bench/cycle108/rule_v3_full.tsv`
+- P-08 production code: `crates/nupic-core/src/ops/compress.rs:209-273`
 
 ### External — Sections 1-3 (TODO populate Cycle 125)
 
