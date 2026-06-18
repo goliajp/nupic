@@ -128,7 +128,15 @@ return bytes_v128;
 
 ---
 
-## [Cycle 106 · open · 可行性高 · ★] F. Per-pile lossless fallback routing
+## [Cycle 106-110 · status:rejected · 可行性高 · ★] F. Per-pile lossless fallback routing
+
+**Cycle 110 实测**:对 6 张 Cycle 106 DSSIM-infeasible fixture(p125/p274/p214/p115/p175/p167)跑 `nupic compress --lossless`:**0/6 PASS**,ratio 1.36-1.95× tiny。TinyPNG 是 lossy,nupic lossless 必然大很多。**rejected** for the rescue role — 这 6 张是 truly single-palette-infeasible,必须 R6 / R3 spatial-aware。
+
+留作 **fall-through option**(如果 K=128 + K=224 都失败时路由到 lossless 至少保底)— 但 Cycle 110 数据显示这种 case 少见。
+
+---
+
+## [Cycle 106 · 原描述 · 已 rejected by Cycle 110] F. Per-pile lossless fallback routing
 
 **Idea**:对 DSSIM-infeasible fixture(任意 K 都过不去 tiny_dssim),不量化,直接 oxipng lossless re-encode → 至少 size 不退。
 
@@ -183,16 +191,17 @@ return bytes_v128;
 
 ---
 
-## 看板:Cycle 109+ 优先级建议(2026-06-18 Cycle 108 实测后更新)
+## 看板:Cycle 111+ 优先级建议(2026-06-18 Cycle 110 实测后更新)
 
 | rank | 候选 | 状态变化 | 原因 |
 |---:|---|---|---|
-| 1 | **J(2-pass K-up fail-safe routing)** | ↑ 升级 from idea A,Cycle 109 直接攻 | 用户选 path B(100% retention)。production cost 1.5× 在 perf budget 内,工程量小 |
-| 2 | F(lossless fallback) | 保持 | 工程量小,可能解锁 Cycle 106 6 张 DSSIM-infeasible,跟 [J] 正交可并行 |
-| 3 | B(K-monotonicity 分析) | 保持 | 论文级最高,paper 主线;不是 ship 路径但 Cycle 109+ paper 收尾期做 |
-| 4 | E(R6 multi-tile) | 保持 | ★★★★★ 远景但工程量大,等 [J] 落地拿到真实 production PASS rate 之后,如果还没到 GREEN 35% 再上 |
-| 5 | G(filter-entropy guided K) | 保持 | [B] 升级版,paper-track |
-| 6 | C(slow-tier zopfli) | 保持 | 易做 ship 路径,但只覆盖 edge case |
-| 7 | D(adaptive dither) | 保持 | 跟 [J] 2-pass 自然合并(K-up branch 已经带 d=0.3),不独立做 |
-| (旧)| A(input-only K predictor) | **ceiling-hit by Cycle 108(99.1%)** | 单 input feature 路径 ceiling 99.1%,被 [J] 取代 |
-| (旧)| H(single-config K↑ default) | **rejected by Cycle 107** | 留作 anti-pattern 记录 |
+| 1 | **E(R6 multi-tile)** | ↑ 升 rank 1 | Cycle 110 数据明确:6 DSSIM-infeasible + 9 perf-locked Pile A = 15 fixture motivation;single-palette 范式已到 perf+quality 双天花板 |
+| 2 | **preset=6 perf 优化**(rayon parallel oxipng)| 新加 | 解锁 Cycle 108 预测的 9 张 Pile A wins;Cycle 110 数据测出 preset=6 perf 死(p245 10s)是 ship blocker;parallel oxipng 可能解锁 |
+| 3 | C(slow-tier `--effort 9`)| 保持 | 用户 opt-in,perf 不影响 default,价值有限但工程量小 |
+| 4 | B(K-monotonicity 分析)| 保持 | 论文级最高,paper 主线 |
+| 5 | G(filter-entropy guided K)| 保持 | [B] 升级版,paper-track |
+| 6 | D(adaptive dither)| 保持 | 跟 [J] 2-pass 自然合并(已带 d=0.3),不独立做 |
+| (已)| J(2-pass K-up fail-safe)| **SHIPPED v1.2.9** | 100% retention by construction,Pile A 真实 wins 2/307 production preset=5 |
+| (已)| A(input-only K predictor)| **ceiling-hit by Cycle 108(99.1%)** | 被 [J] 取代 |
+| (已)| F(lossless fallback)| **rejected by Cycle 110(0/6)** | 6 DSSIM-infeasible lossless 全在 1.36-1.95× tiny |
+| (已)| H(single-config K↑ default)| **rejected by Cycle 107** | 留作 anti-pattern 记录 |

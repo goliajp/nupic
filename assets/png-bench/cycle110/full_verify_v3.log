@@ -1,0 +1,18 @@
+mode=full fixtures=506
+wall = 711.4s (513 fixtures)
+
+=== Cycle 109 P-08 wire verification ===
+Total PASS = 115/513 (22.4%)
+Regressions = 0 (vs v1.2.8 baseline)
+
+Per-pile:
+  PASS   n=106 v1.2.9_pass=106  v1.2.8_baseline_pass=106  regressed=0
+  PileA  n=307 v1.2.9_pass=  2  v1.2.8_baseline_pass=  0  regressed=0
+  PileB  n= 40 v1.2.9_pass=  3  v1.2.8_baseline_pass=  3  regressed=0
+  PileC  n= 53 v1.2.9_pass=  0  v1.2.8_baseline_pass=  0  regressed=0
+  b7     n=  7 v1.2.9_pass=  4  v1.2.8_baseline_pass=  0  regressed=0
+
+Decision gate:
+  PASS pile retention: Y
+  baseline-7 retention (no v1.2.8 PASS regressed): Y
+  → GREEN — ready to ship v1.2.9

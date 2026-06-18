@@ -251,6 +251,13 @@ fn encode_png_stone_c(img: &Image, opts: &CompressOpts) -> Result<Vec<u8>> {
     // Cycle 106 data shows K=224 sometimes beats lossless 4× (p245:
     // lossless 2.74 MB vs K=224 0.68 MB on the same content).
     if p08_eligible {
+        // K-up branch inherits oxipng preset from opts.effort (default
+        // 5). Cycle 110 measured: preset=6 on 9.83 MP photo crosses
+        // the perf KPI badly (10 s vs preset=5 ~450 ms), out of NAS/CDN
+        // budget. Preset=5 gives ~2/307 Pile A wins (vs Cycle 108
+        // spike's preset=6 prediction of 11/307); accept the trade-off
+        // since the alternative either breaks perf or requires Cycle
+        // 111 R6 multi-tile work.
         let kup_opts = nupic_quantize::QuantizeOpts {
             n_colors: 224,
             oxipng_preset: opts.effort.min(10),

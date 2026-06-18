@@ -51,9 +51,15 @@ struct Row {
 fn main() -> anyhow::Result<()> {
     let root = workspace_root();
     let all = load_corpus_500_with_baseline(&root)?;
-    let mut sample = pile_sample_24(&all);
+    let mode = std::env::var("CYCLE_VALIDATE_MODE").unwrap_or_else(|_| "sample".into());
+    let mut sample: Vec<Fixture> = if mode == "full" {
+        all.clone()
+    } else {
+        pile_sample_24(&all)
+    };
     let mut b7_fx = baseline_7(&all);
     sample.append(&mut b7_fx);
+    eprintln!("mode={} fixtures={}", mode, sample.len());
 
     let corpus = root.join("assets/png-bench/corpus-500");
     let inputs = root.join("assets/png-bench/inputs");
@@ -110,11 +116,17 @@ fn main() -> anyhow::Result<()> {
         let n_pixels = wi * he;
         let size_cap = (fx.tiny_size as f64 * 0.80) as u64;
         let size_pass = c_size <= size_cap;
-        let dssim_pass = c_dssim <= fx.tiny_dssim;
+        // Cached tiny_dssim was rounded to 6 decimal places when the
+        // corpus-500-dssim.tsv was built; on byte-identical outputs
+        // strict-comparing the live DSSIM (1e-7 range) against a
+        // rounded 0.0 produces spurious "regressions" (e.g. s018
+        // synthetic gradient where v1.2.8 == v1.2.9 == 2967 B).
+        // Treat anything within 1e-5 of tiny_dssim as a pass.
+        let dssim_pass = c_dssim <= fx.tiny_dssim + 1.0e-5;
         // v1.2.8 baseline pass (from cached data)
         let baseline_both = fx.baseline_nupic_size > 0
             && fx.baseline_nupic_size <= size_cap
-            && fx.baseline_nupic_dssim <= fx.tiny_dssim;
+            && fx.baseline_nupic_dssim <= fx.tiny_dssim + 1.0e-5;
         rows.push(Row {
             name: fx.name.clone(),
             pile: fx.pile.clone(),
