@@ -554,23 +554,31 @@ fn run_compress(args: CompressArgs) -> Result<()> {
         let mut format = resolve_compress_format(args.format, &per_output)?;
         let mut quality = quality;
 
-        // Cycle 117 P-09: photo-rescue-webp opt-in. When the resolved
-        // format is PNG, the input is an opaque photo at ≥ 0.5 MP, and
-        // the user requested rescue, re-encode as WebP-lossy q=80 with
-        // .webp extension. Cycle 116 measured 6/6 PASS on the R6
-        // DSSIM-infeasible cohort with mean 0.091× TinyPNG size.
-        if args.photo_rescue_webp
-            && format == Format::Png
+        // Cycle 117 P-09 + Cycle 118 P-10: photo-rescue opt-in.
+        // When the resolved format is PNG, the input is an opaque
+        // photo at ≥ 0.5 MP, and the user requested rescue, re-encode
+        // as WebP-lossy q=80 (P-09) or AVIF-lossy q=70 (P-10) with
+        // matching extension swap. Mutually exclusive flags.
+        // - Cycle 116: WebP q=75-85 6/6 PASS, mean 0.091× tiny
+        // - Cycle 118: AVIF q=70 6/6 PASS, mean 0.068× tiny, ~24%
+        //   tighter than WebP, DSSIM strictly better on 5/6
+        if format == Format::Png
             && per_output.as_os_str() != "-"
+            && (args.photo_rescue_webp || args.photo_rescue_avif)
             && is_photo_content(&img)
         {
-            format = Format::Webp;
-            // Swap path extension .png → .webp
-            per_output.set_extension("webp");
-            // If user didn't pin quality (and not lossless / target-*),
-            // default to q=80 — Cycle 116 sweet spot.
-            if matches!(quality, Quality::Auto) {
-                quality = Quality::Format(80);
+            if args.photo_rescue_avif {
+                format = Format::Avif;
+                per_output.set_extension("avif");
+                if matches!(quality, Quality::Auto) {
+                    quality = Quality::Format(70);
+                }
+            } else {
+                format = Format::Webp;
+                per_output.set_extension("webp");
+                if matches!(quality, Quality::Auto) {
+                    quality = Quality::Format(80);
+                }
             }
         }
 

@@ -1,0 +1,19 @@
+wall = 7.9s (18 jobs)
+
+=== Cycle 118 AVIF for R6 cohort ===
+PASS both: 6/6
+  p115_1024x768.png            q=70 size=14.7KB ratio=0.074× DSSIM=0.001057
+  p125_1920x1080.png           q=70 size=35.1KB ratio=0.075× DSSIM=0.005865
+  p167_1920x1080.png           q=70 size=26.0KB ratio=0.059× DSSIM=0.000824
+  p175_1920x1080.png           q=70 size=29.4KB ratio=0.058× DSSIM=0.001172
+  p214_2400x1600.png           q=70 size=86.8KB ratio=0.081× DSSIM=0.001004
+  p274_3840x2560.png           q=70 size=152.3KB ratio=0.062× DSSIM=0.000903
+
+=== AVIF vs WebP (Cycle 116) per fixture ===
+  fixture                         WebP_KB    AVIF_KB    size_diff   DSSIM_diff
+  p115_1024x768.png                  17.3       14.7       -14.8%    -0.000316
+  p125_1920x1080.png                 46.4       35.1       -24.2%    -0.001670
+  p167_1920x1080.png                 51.3       26.0       -49.4%    +0.000125
+  p175_1920x1080.png                 37.5       29.4       -21.5%    -0.000217
+  p214_2400x1600.png                102.0       86.8       -14.9%    -0.000676
+  p274_3840x2560.png                187.9      152.3       -19.0%    -0.000560

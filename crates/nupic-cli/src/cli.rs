@@ -330,8 +330,18 @@ pub struct CompressArgs {
     /// TinyPNG). Output filename gets its extension swapped from
     /// `.png` to `.webp`. Opt-in only — does not affect PNG default
     /// behavior unless this flag is set.
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, conflicts_with = "photo_rescue_avif")]
     pub photo_rescue_webp: bool,
+
+    /// **Cycle 118 P-10**: same trigger as `--photo-rescue-webp` but
+    /// re-encodes as AVIF-lossy q=70 instead. Cycle 118 measured AVIF
+    /// at 0.068× TinyPNG mean (vs 0.091× WebP — ~24 % tighter) with
+    /// strictly better DSSIM on 5/6 fixtures. Use this when target
+    /// audiences are AVIF-capable (Chrome 85+, Safari 16+, Firefox
+    /// 93+); fall back to `--photo-rescue-webp` for broader reach.
+    /// Mutually exclusive with `--photo-rescue-webp`.
+    #[arg(long, default_value_t = false, conflicts_with = "photo_rescue_webp")]
+    pub photo_rescue_avif: bool,
 
     /// **Stone E light dither** for the indexed PNG path. Accepts
     /// `off` (= 0.0, default — "又小又好" sweet spot for mixed
