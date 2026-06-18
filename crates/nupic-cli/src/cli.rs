@@ -322,6 +322,17 @@ pub struct CompressArgs {
     #[arg(long, default_value_t = false)]
     pub use_nupic_png: bool,
 
+    /// **Cycle 117 P-09**: when the input is an opaque photo
+    /// (alpha ≥ 0.95) at ≥ 0.5 MP and the resolved output format is
+    /// PNG, re-encode as WebP-lossy q=80 instead — typically 5-14×
+    /// smaller than PNG with TinyPNG-comparable visual quality
+    /// (Cycle 116 data: 6/6 fixtures DSSIM ≤ tiny, mean size 0.091×
+    /// TinyPNG). Output filename gets its extension swapped from
+    /// `.png` to `.webp`. Opt-in only — does not affect PNG default
+    /// behavior unless this flag is set.
+    #[arg(long, default_value_t = false)]
+    pub photo_rescue_webp: bool,
+
     /// **Stone E light dither** for the indexed PNG path. Accepts
     /// `off` (= 0.0, default — "又小又好" sweet spot for mixed
     /// corpora), `auto` (classifier picks 0.5 on fully-opaque large

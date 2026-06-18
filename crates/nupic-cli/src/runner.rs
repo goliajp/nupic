@@ -545,13 +545,35 @@ fn run_compress(args: CompressArgs) -> Result<()> {
     let quality = build_quality(&args)?;
     for input in inputs {
         let img = decode_input(input)?;
-        let per_output = match &output_mode {
+        let mut per_output = match &output_mode {
             OutputMode::SingleFile(path) => path.clone(),
             OutputMode::Directory(dir) => derive_into_dir(dir, input, args.format, "compressed"),
             OutputMode::Auto => derive_next_to_input(input, args.format, "compressed"),
             OutputMode::Stdout => PathBuf::from("-"),
         };
-        let format = resolve_compress_format(args.format, &per_output)?;
+        let mut format = resolve_compress_format(args.format, &per_output)?;
+        let mut quality = quality;
+
+        // Cycle 117 P-09: photo-rescue-webp opt-in. When the resolved
+        // format is PNG, the input is an opaque photo at ≥ 0.5 MP, and
+        // the user requested rescue, re-encode as WebP-lossy q=80 with
+        // .webp extension. Cycle 116 measured 6/6 PASS on the R6
+        // DSSIM-infeasible cohort with mean 0.091× TinyPNG size.
+        if args.photo_rescue_webp
+            && format == Format::Png
+            && per_output.as_os_str() != "-"
+            && is_photo_content(&img)
+        {
+            format = Format::Webp;
+            // Swap path extension .png → .webp
+            per_output.set_extension("webp");
+            // If user didn't pin quality (and not lossless / target-*),
+            // default to q=80 — Cycle 116 sweet spot.
+            if matches!(quality, Quality::Auto) {
+                quality = Quality::Format(80);
+            }
+        }
+
         let opts = CompressOpts {
             format,
             quality,
@@ -571,6 +593,16 @@ fn run_compress(args: CompressArgs) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Cycle 117 P-09: photo-content detector. Opaque (α ≥ 0.95) and
+/// ≥ 0.5 MP. Cheap single-pass scan via `Image::opaque_fraction`.
+fn is_photo_content(img: &Image) -> bool {
+    let n_pixels = (img.width() as u64) * (img.height() as u64);
+    if n_pixels < 500_000 {
+        return false;
+    }
+    img.opaque_fraction() >= 0.95
 }
 
 #[derive(Debug, Clone)]

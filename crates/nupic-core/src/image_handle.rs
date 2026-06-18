@@ -89,6 +89,19 @@ impl Image {
     pub fn compress(&self, opts: compress::CompressOpts) -> Result<compress::EncodedImage> {
         compress::encode(self, opts)
     }
+
+    /// Fraction of fully-opaque (α = 255) pixels. Returns 1.0 for
+    /// zero-pixel images. Cheap O(N) alpha-channel scan — Cycle 117
+    /// P-09 photo-content detector for the WebP rescue routing.
+    pub fn opaque_fraction(&self) -> f64 {
+        let r = self.inner.to_rgba8();
+        let total = (r.width() as u64) * (r.height() as u64);
+        if total == 0 {
+            return 1.0;
+        }
+        let opaque = r.as_raw().chunks_exact(4).filter(|c| c[3] == 255).count() as u64;
+        opaque as f64 / total as f64
+    }
 }
 
 // Crate-internal access for op implementations. NOT part of the public API.
