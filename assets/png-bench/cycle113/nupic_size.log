@@ -1,0 +1,7 @@
+wall = 1.5s (6 fixtures)
+
+=== Cycle 113 .nupic size estimate (8x8 tile × K=192, zlib-best per global index stream) ===
+PASS (size ≤ 0.80x tiny): 1/6
+mean ratio vs tiny: 1.1149x
+
+→ YELLOW — .nupic partially feasible, tune palette sharing / entropy coder
